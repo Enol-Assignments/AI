@@ -1,75 +1,128 @@
 <navigation-bar title="Maze Duel" back="{{false}}" color="black" background="#f7f1e6"></navigation-bar>
-<view class="page">
-  <view class="hud-card">
-    <view class="hud-row">
-      <text class="hud-label">我方 HP</text>
-      <text class="hud-value">{{hpText}}</text>
+<scroll-view class="page" scroll-y="true" style="height: 100vh;">
+  <view class="content">
+    <!-- 技能选择区域 -->
+    <view class="skills-container">
+      <!-- 我方技能栏 -->
+      <view class="skills-panel player-skills">
+        <view class="skills-title">我方技能</view>
+        <view class="skills-grid">
+          <view 
+            wx:for="{{skills}}" 
+            wx:key="id"
+            class="skill-button {{item.available ? (item.selected ? 'selected' : 'available') : 'cooldown'}}"
+            data-skill-id="{{item.id}}"
+            bindtap="handleSkillTap"
+          >
+            <view class="skill-name">{{item.name}}</view>
+            <view class="skill-cooldown" wx:if="{{!item.available}}">{{item.cooldown.toFixed(1)}}s</view>
+          </view>
+        </view>
+      </view>
+      
+      <!-- 敌方技能栏 -->
+      <view class="skills-panel enemy-skills">
+        <view class="skills-title">敌方技能</view>
+        <view class="skills-grid">
+          <view 
+            wx:for="{{enemySkills}}" 
+            wx:key="id"
+            class="skill-button {{item.available ? (item.selected ? 'selected' : 'available') : 'cooldown'}}"
+            data-skill-id="{{item.id}}"
+            data-is-enemy="true"
+            bindtap="handleSkillTap"
+          >
+            <view class="skill-name">{{item.name}}</view>
+            <view class="skill-cooldown" wx:if="{{!item.available}}">{{item.cooldown.toFixed(1)}}s</view>
+          </view>
+        </view>
+      </view>
     </view>
-    <view class="hud-row">
-      <text class="hud-label">敌方 HP</text>
-      <text class="hud-value danger">{{enemyHpText}}</text>
-    </view>
-    <view class="hud-row">
-      <text class="hud-label">弹药</text>
-      <text class="hud-value">{{ammoText}}</text>
-    </view>
-    <view class="hud-row">
+
+    <view class="hud-card">
+      <view class="hud-row">
+        <text class="hud-label">我方 HP</text>
+        <text class="hud-value">{{hpText}}</text>
+      </view>
+      <view class="hud-row">
+        <text class="hud-label">敌方 HP</text>
+        <text class="hud-value danger">{{enemyHpText}}</text>
+      </view>
+      <view class="hud-row">
+        <text class="hud-label">弹药</text>
+        <text class="hud-value">{{ammoText}}</text>
+      </view>
+      <view class="hud-row">
       <text class="hud-label">时间</text>
       <text class="hud-value">{{timeText}}</text>
     </view>
     <text class="status-text">{{statusText}}</text>
-  </view>
-
-  <canvas id="game-canvas" type="2d" class="game-canvas"></canvas>
-
-  <view class="control-panel">
-    <view class="dpad">
-      <view class="dpad-row">
-        <view class="control-spacer"></view>
-        <view
-          class="control-button"
-          data-key="up"
-          bindtouchstart="handleControlStart"
-          bindtouchend="handleControlEnd"
-          bindtouchcancel="handleControlEnd"
-        >↑</view>
-        <view class="control-spacer"></view>
-      </view>
-      <view class="dpad-row">
-        <view
-          class="control-button"
-          data-key="left"
-          bindtouchstart="handleControlStart"
-          bindtouchend="handleControlEnd"
-          bindtouchcancel="handleControlEnd"
-        >←</view>
-        <view
-          class="control-button restart"
-          bindtap="startNewGame"
-        >重开</view>
-        <view
-          class="control-button"
-          data-key="right"
-          bindtouchstart="handleControlStart"
-          bindtouchend="handleControlEnd"
-          bindtouchcancel="handleControlEnd"
-        >→</view>
-      </view>
-      <view class="dpad-row">
-        <view class="control-spacer"></view>
-        <view
-          class="control-button"
-          data-key="down"
-          bindtouchstart="handleControlStart"
-          bindtouchend="handleControlEnd"
-          bindtouchcancel="handleControlEnd"
-        >↓</view>
-        <view class="control-spacer"></view>
-      </view>
+    <view class="start-button-container" wx:if="{{!gameStarted}}">
+      <view class="start-button" bindtap="startGame">开始游戏</view>
+    </view>
     </view>
 
-    <view class="shoot-wrap">
-      <view class="shoot-button" bindtap="handleShootTap">开火</view>
+    <canvas id="game-canvas" type="2d" class="game-canvas"></canvas>
+
+    <view class="control-panel">
+      <view class="dpad">
+        <view class="dpad-row">
+          <view class="control-spacer"></view>
+          <view
+            class="control-button"
+            data-key="up"
+            bindtouchstart="handleControlStart"
+            bindtouchend="handleControlEnd"
+            bindtouchcancel="handleControlEnd"
+          >↑</view>
+          <view class="control-spacer"></view>
+        </view>
+        <view class="dpad-row">
+          <view
+            class="control-button"
+            data-key="left"
+            bindtouchstart="handleControlStart"
+            bindtouchend="handleControlEnd"
+            bindtouchcancel="handleControlEnd"
+          >←</view>
+          <view
+            class="control-button restart"
+            bindtap="resetGame"
+          >重开</view>
+          <view
+            class="control-button"
+            data-key="right"
+            bindtouchstart="handleControlStart"
+            bindtouchend="handleControlEnd"
+            bindtouchcancel="handleControlEnd"
+          >→</view>
+        </view>
+        <view class="dpad-row">
+          <view class="control-spacer"></view>
+          <view
+            class="control-button"
+            data-key="down"
+            bindtouchstart="handleControlStart"
+            bindtouchend="handleControlEnd"
+            bindtouchcancel="handleControlEnd"
+          >↓</view>
+          <view class="control-spacer"></view>
+        </view>
+      </view>
+
+      <view class="shoot-wrap">
+        <view class="shoot-direction">
+          <view class="direction-button" data-direction="up" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">↑</view>
+          <view class="direction-row">
+            <view class="direction-button" data-direction="left" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">←</view>
+            <view class="direction-button" data-direction="down" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">↓</view>
+            <view class="direction-button" data-direction="right" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">→</view>
+          </view>
+        </view>
+      </view>
     </view>
+    
+    <!-- 底部黑边 -->
+    <view class="bottom-border"></view>
   </view>
-</view>
+</scroll-view>
