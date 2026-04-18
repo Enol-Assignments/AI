@@ -1,12 +1,15 @@
 page {
-  min-height: 100vh;
   background: linear-gradient(180deg, #f9f4eb 0%, #eadfcb 100%);
 }
 
 .page {
-  min-height: 100vh;
+  width: 100%;
+}
+
+.content {
   padding: 24rpx;
   box-sizing: border-box;
+  min-height: 100vh;
 }
 
 .hud-card {
@@ -98,6 +101,7 @@ page {
   width: 220rpx;
   display: flex;
   justify-content: flex-end;
+  align-items: center;
 }
 
 .shoot-button {
@@ -108,7 +112,180 @@ page {
   color: #fff8f2;
 }
 
+/* 射击方向按钮样式 */
+.shoot-direction {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.direction-row {
+  display: flex;
+  gap: 8rpx;
+}
+
+.direction-button {
+  width: 60rpx;
+  height: 60rpx;
+  border-radius: 12rpx;
+  background: #ef7f5a;
+  color: #fff8f2;
+  font-size: 24rpx;
+  font-weight: 700;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-shadow: 0 6rpx 12rpx rgba(239, 127, 90, 0.3);
+  transition: all 0.2s ease;
+}
+
+.direction-button:active {
+  transform: scale(0.92);
+  box-shadow: 0 3rpx 6rpx rgba(239, 127, 90, 0.4);
+}
+
 .control-spacer {
   width: 120rpx;
   height: 120rpx;
+}
+
+/* 技能容器样式 */
+.skills-container {
+  margin-top: 16rpx;
+  display: flex;
+  flex-direction: row;
+  gap: 12rpx;
+  align-items: center;
+}
+
+/* 技能面板样式 */
+.skills-panel {
+  flex: 1;
+  background: rgba(255, 250, 242, 0.92);
+  border: 2rpx solid rgba(73, 57, 44, 0.12);
+  border-radius: 12rpx;
+  padding: 8rpx;
+  box-shadow: 0 4rpx 12rpx rgba(73, 57, 44, 0.08);
+}
+
+.player-skills {
+  border-left: 4rpx solid #2f7cf6;
+}
+
+.enemy-skills {
+  border-left: 4rpx solid #f25f5c;
+}
+
+.skills-title {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: #4a3b2f;
+  margin-bottom: 8rpx;
+  text-align: center;
+}
+
+.skills-grid {
+  display: flex;
+  flex-direction: row;
+  gap: 6rpx;
+  justify-content: space-around;
+}
+
+.skill-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8rpx 4rpx;
+  border-radius: 8rpx;
+  box-shadow: 0 2rpx 4rpx rgba(73, 57, 44, 0.08);
+  transition: all 0.2s ease;
+  min-height: 60rpx;
+  flex: 1;
+}
+
+.skill-button.available {
+  background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%);
+  border: 2rpx solid #c3e6cb;
+  cursor: pointer;
+}
+
+.skill-button.available:active {
+  transform: scale(0.96);
+  box-shadow: 0 4rpx 8rpx rgba(73, 57, 44, 0.12);
+}
+
+.skill-button.selected {
+  background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+  border: 3rpx solid #2196f3;
+  box-shadow: 0 0 16rpx rgba(33, 150, 243, 0.6);
+  transform: scale(1.05);
+  transition: all 0.3s ease;
+}
+
+.skill-button.selected:active {
+  transform: scale(1);
+}
+
+.skill-button.cooldown {
+  background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+  border: 2rpx solid #f1b0b7;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* 开始按钮样式 */
+.start-button-container {
+  margin-top: 20rpx;
+  display: flex;
+  justify-content: center;
+}
+
+.start-button {
+  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  color: white;
+  font-size: 32rpx;
+  font-weight: 700;
+  padding: 16rpx 48rpx;
+  border-radius: 24rpx;
+  box-shadow: 0 8rpx 16rpx rgba(76, 175, 80, 0.3);
+  transition: all 0.3s ease;
+}
+
+.start-button:active {
+  transform: scale(0.96);
+  box-shadow: 0 4rpx 8rpx rgba(76, 175, 80, 0.4);
+}
+
+.skill-name {
+  font-size: 16rpx;
+  font-weight: 600;
+  color: #4a3b2f;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.skill-cooldown {
+  position: absolute;
+  bottom: 2rpx;
+  right: 2rpx;
+  font-size: 12rpx;
+  font-weight: 700;
+  color: #c44f4f;
+  background: rgba(255, 255, 255, 0.8);
+  padding: 1rpx 4rpx;
+  border-radius: 6rpx;
+  min-width: 30rpx;
+  text-align: center;
+}
+
+/* 底部黑边 */
+.bottom-border {
+  margin-top: 40rpx;
+  height: 40rpx;
+  background: linear-gradient(90deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 50%, rgba(0,0,0,0.3) 100%);
+  border-radius: 20rpx;
+  margin-bottom: 24rpx;
 }

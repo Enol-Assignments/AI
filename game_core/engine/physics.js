@@ -4,6 +4,9 @@ const {
   TILE_COVER,
   TILE_WALL,
 } = require('../constants');
+const { processSkillBullet } = require('../skills/skillManager');
+const { handleBounce, reflectAttack } = require('../skills/pingPong');
+const { updateBullet } = require('../skills/booleanMotion');
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -56,8 +59,29 @@ function updateAmmo(entity, dt) {
   }
 }
 
-function buildBullet(owner, target) {
-  const vector = normalize(target.x - owner.x, target.y - owner.y);
+function buildBullet(owner, target, shootDirection) {
+  let vector;
+  if (owner.team === 'player' && shootDirection) {
+    // 根据射击方向发射子弹
+    switch (shootDirection) {
+      case 'up':
+        vector = { x: 0, y: -1 };
+        break;
+      case 'down':
+        vector = { x: 0, y: 1 };
+        break;
+      case 'left':
+        vector = { x: -1, y: 0 };
+        break;
+      case 'right':
+      default:
+        vector = { x: 1, y: 0 };
+        break;
+    }
+  } else {
+    // AI子弹或无方向时朝向目标
+    vector = normalize(target.x - owner.x, target.y - owner.y);
+  }
   return {
     ownerId: owner.id,
     ownerTeam: owner.team,
@@ -67,10 +91,11 @@ function buildBullet(owner, target) {
     vy: vector.y * CONFIG.bulletSpeed,
     damage: owner.atk,
     radius: CONFIG.bulletRadius,
+    lifetime: CONFIG.bulletLifetime,
   };
 }
 
-function tryShoot(entity, command, bullets, fallbackTarget) {
+function tryShoot(entity, command, bullets, fallbackTarget, state) {
   if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) {
     return;
   }
@@ -80,7 +105,12 @@ function tryShoot(entity, command, bullets, fallbackTarget) {
     return;
   }
 
-  bullets.push(buildBullet(entity, target));
+  const bullet = buildBullet(entity, target, command.shootDirection);
+  bullets.push(bullet);
+
+  // 处理技能子弹
+  processSkillBullet(entity, bullet, state);
+
   entity.ammo -= 1;
   entity.fireCooldown = CONFIG.fireCooldown;
   entity.action = 'shoot';
@@ -95,24 +125,64 @@ function updateBullets(state, dt) {
   const survivors = [];
 
   state.bullets.forEach((bullet) => {
+    // 更新子弹生命周期
+    if (bullet.skillEffect !== 'ping_pong') {
+      bullet.lifetime -= dt;
+      if (bullet.lifetime <= 0) {
+        return;
+      }
+    }
+
+    // 更新布尔运动子弹
+    updateBullet(bullet, dt, state);
+
     bullet.x += bullet.vx * dt;
     bullet.y += bullet.vy * dt;
+
+    // 确保子弹不离开显示区域
+    const mapWidth = state.map[0].length;
+    const mapHeight = state.map.length;
+
+    // 对于布尔运动子弹，确保在显示区域内
+    if (bullet.skillEffect === 'boolean_motion') {
+      bullet.x = clamp(bullet.x, 0.5, mapWidth - 1.5);
+      bullet.y = clamp(bullet.y, 0.5, mapHeight - 1.5);
+    }
 
     const tileX = Math.round(bullet.x);
     const tileY = Math.round(bullet.y);
     const tile = state.map[tileY] && state.map[tileY][tileX];
-    if (tile === TILE_WALL) {
+
+    // 处理乒乓球反弹
+    if (!handleBounce(bullet, state)) {
       return;
+    }
+
+    if (tile === TILE_WALL) {
+      // 非乒乓球和非布尔运动子弹碰到墙壁消失
+      if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
+        return;
+      }
     }
 
     if (tile === TILE_COVER) {
       state.map[tileY][tileX] = 0;
-      return;
+      // 非乒乓球和非布尔运动子弹碰到掩体消失
+      if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
+        return;
+      }
     }
 
     const targets = [state.entities.player, state.entities.enemy];
     for (let i = 0; i < targets.length; i += 1) {
       const target = targets[i];
+
+      // 处理乒乓球手的反弹攻击
+      if (target.id !== bullet.ownerId && reflectAttack(target, bullet)) {
+        survivors.push(bullet);
+        return;
+      }
+
       if (target.id === bullet.ownerId || target.hp <= 0) {
         continue;
       }
@@ -150,8 +220,8 @@ function updateWorld(state, commands, dt) {
   tryMove(player, state.map, playerCommand.moveX, playerCommand.moveY, dt);
   tryMove(enemy, state.map, enemyCommand.moveX, enemyCommand.moveY, dt);
 
-  tryShoot(player, playerCommand, state.bullets, enemy);
-  tryShoot(enemy, enemyCommand, state.bullets, player);
+  tryShoot(player, playerCommand, state.bullets, enemy, state);
+  tryShoot(enemy, enemyCommand, state.bullets, player, state);
 
   updateBullets(state, dt);
 }

@@ -11,15 +11,16 @@ const {
 const { generateMaze } = require('../maze/generator');
 const { tickBehaviorTree } = require('../ai/behaviorTree');
 const { updateWorld } = require('./physics');
+const { initSkills, updateSkills, activateSkill } = require('../skills/skillManager');
 
 function createEntity(id, team, x, y, color, overrides) {
-  return Object.assign({
+  const entity = Object.assign({
     id,
     team,
     x,
     y,
-    hp: 100,
-    maxHp: 100,
+    hp: 1000,
+    maxHp: 1000,
     atk: 16,
     def: 4,
     ammo: CONFIG.maxAmmo,
@@ -29,7 +30,15 @@ function createEntity(id, team, x, y, color, overrides) {
     radius: CONFIG.entityRadius,
     action: ACTION_IDLE,
     color,
+    activeSkill: null,
+    skillCooldown: 0,
+    skillData: {},
+    timeTravelClone: null,
   }, overrides || {});
+
+  // 初始化技能系统
+  initSkills(entity);
+  return entity;
 }
 
 function createGameState() {
@@ -61,6 +70,7 @@ function getPlayerCommand(input, enemy) {
     moveX,
     moveY,
     shoot: Boolean(input.shoot),
+    shootDirection: input.shootDirection || 'right',
     target: { x: enemy.x, y: enemy.y },
   };
 }
@@ -107,6 +117,11 @@ function stepGame(state, input, dt) {
 
   const player = state.entities.player;
   const enemy = state.entities.enemy;
+
+  // 更新技能状态
+  updateSkills(player, dt);
+  updateSkills(enemy, dt);
+
   const commands = {
     player: getPlayerCommand(input, enemy),
     enemy: tickBehaviorTree(enemy, player, state.bullets, state.map),
