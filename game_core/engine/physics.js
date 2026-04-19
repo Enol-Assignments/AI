@@ -3,55 +3,193 @@ const {
   CONFIG,
   TILE_COVER,
   TILE_WALL,
+  TILE_EMPTY,
+  GRID_SIZE,
 } = require('../constants');
+
 const { processSkillBullet } = require('../skills/skillManager');
 const { handleBounce, reflectAttack } = require('../skills/pingPong');
 const { updateBullet } = require('../skills/booleanMotion');
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
+// ====================== 工具函数 ======================
+
+function toPixels(val) {
+  return val * GRID_SIZE;
 }
 
-function normalize(x, y) {
-  const length = Math.sqrt(x * x + y * y) || 1;
-  return { x: x / length, y: y / length };
+function isWallOrCover(map, x, y) {
+  const tx = Math.floor(x);
+  const ty = Math.floor(y);
+  if (!map[ty] || map[ty][tx] === undefined) return true;
+  const tile = map[ty][tx];
+  return tile === TILE_WALL || tile === TILE_COVER;
 }
 
-function isBlocked(map, x, y) {
-  const tileX = Math.round(x);
-  const tileY = Math.round(y);
-  return !map[tileY]
-    || map[tileY][tileX] === undefined
-    || map[tileY][tileX] === TILE_WALL
-    || map[tileY][tileX] === TILE_COVER;
+// 多点采样检测 + 破坏掩体（针对布尔运动加强版）
+function handleBulletWallAndCover(bullet, map) {
+  const samples = 10;   // 针对高速追踪子弹增加采样
+  const prevX = bullet.x - bullet.vx * 0.025;
+  const prevY = bullet.y - bullet.vy * 0.025;
+
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const checkX = prevX + (bullet.x - prevX) * t;
+    const checkY = prevY + (bullet.y - prevY) * t;
+
+    const tx = Math.floor(checkX);
+    const ty = Math.floor(checkY);
+
+    if (!map[ty] || map[ty][tx] === undefined) continue;
+
+    const tile = map[ty][tx];
+
+    if (tile === TILE_WALL) {
+      if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
+        return false;
+      }
+      // 布尔运动碰到墙也消失
+      if (bullet.skillEffect === 'boolean_motion') {
+        return false;
+      }
+    }
+
+    if (tile === TILE_COVER) {
+      map[ty][tx] = TILE_EMPTY;
+
+      // 所有技能子弹打到箱子都消失
+      if (bullet.skillEffect === 'ping_pong' || bullet.skillEffect === 'boolean_motion') {
+        return false;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+// ====================== 实体移动 ======================
+
+function resolveEntityCollisions(entity, map) {
+  const radius = toPixels(entity.radius || CONFIG.entityRadius);
+  const ex = toPixels(entity.x);
+  const ey = toPixels(entity.y);
+
+  for (let y = 0; y < map.length; y++) {
+    for (let x = 0; x < map[y].length; x++) {
+      if (map[y][x] !== TILE_WALL && map[y][x] !== TILE_COVER) continue;
+
+      const rx = x * GRID_SIZE, ry = y * GRID_SIZE;
+      const closestX = Math.max(rx, Math.min(ex, rx + GRID_SIZE));
+      const closestY = Math.max(ry, Math.min(ey, ry + GRID_SIZE));
+
+      const dx = ex - closestX;
+      const dy = ey - closestY;
+      const distSq = dx*dx + dy*dy;
+
+      if (distSq < radius*radius && distSq > 0.0001) {
+        const dist = Math.sqrt(distSq) || 0.001;
+        entity.x += (dx / dist) * (radius - dist + 3) / GRID_SIZE;
+        entity.y += (dy / dist) * (radius - dist + 3) / GRID_SIZE;
+      }
+    }
+  }
 }
 
 function tryMove(entity, map, moveX, moveY, dt) {
-  if (!moveX && !moveY) {
-    return;
-  }
+  if (!moveX && !moveY) return;
+  const len = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+  const vx = moveX / len;
+  const vy = moveY / len;
 
-  const vector = normalize(moveX, moveY);
   const distance = entity.speed * dt;
-  const targetX = entity.x + vector.x * distance;
-  const targetY = entity.y + vector.y * distance;
+  const steps = 8;
+  const step = distance / steps;
 
-  if (!isBlocked(map, targetX, entity.y)) {
-    entity.x = clamp(targetX, 1, map[0].length - 2);
-  }
-  if (!isBlocked(map, entity.x, targetY)) {
-    entity.y = clamp(targetY, 1, map.length - 2);
+  for (let i = 0; i < steps; i++) {
+    entity.x += vx * step;
+    entity.y += vy * step;
+    entity.x = Math.max(1.0, Math.min(entity.x, map[0].length - 2));
+    entity.y = Math.max(1.0, Math.min(entity.y, map.length - 2));
+    resolveEntityCollisions(entity, map);
   }
 }
 
+// ====================== 子弹更新 - 已优化顺序 ======================
+
+function updateBullets(state, dt) {
+  const survivors = [];
+
+  for (let i = 0; i < state.bullets.length; i++) {
+    const bullet = state.bullets[i];
+
+    // 生命周期管理
+    if (bullet.skillEffect !== 'ping_pong') {
+      bullet.lifetime = (bullet.lifetime || CONFIG.bulletLifetime) - dt;
+      if (bullet.lifetime <= 0) continue;
+    }
+
+    // 移动子弹
+    bullet.x += bullet.vx * dt;
+    bullet.y += bullet.vy * dt;
+
+    // === 1. 强制墙和掩体碰撞检测（所有子弹都必须先走这里）===
+    if (!handleBulletWallAndCover(bullet, state.map)) {
+      continue;   // 子弹消失（包括打到箱子的乒乓球）
+    }
+
+    // === 2. 布尔运动专用追踪更新（必须放在墙检测之后）===
+    if (bullet.skillEffect === 'boolean_motion' && typeof updateBullet === 'function') {
+      updateBullet(bullet, dt, state);
+    }
+
+    // === 3. 乒乓球专用反弹处理（放在墙检测之后）===
+    if (bullet.skillEffect === 'ping_pong' && typeof handleBounce === 'function') {
+      if (!handleBounce(bullet, state)) {
+        continue;                 // handleBounce 返回 false 时子弹消失
+      }
+    }
+
+    // === 4. 子弹击中实体检测 ===
+    let hit = false;
+    const targets = [state.entities.player, state.entities.enemy];
+
+    for (let target of targets) {
+      if (target.id === bullet.ownerId || target.hp <= 0) continue;
+
+      const dx = target.x - bullet.x;
+      const dy = target.y - bullet.y;
+      const distSq = dx*dx + dy*dy;
+      const hitR = (target.radius || CONFIG.entityRadius) + (bullet.radius || CONFIG.bulletRadius);
+
+      if (distSq <= hitR * hitR) {
+        const reduced = Math.max(1, bullet.damage - target.def);
+        target.hp = Math.max(0, target.hp - reduced);
+        target.action = ACTION_IDLE;
+        hit = true;
+        break;
+      }
+
+      if (typeof reflectAttack === 'function' && reflectAttack(target, bullet)) {
+        hit = true;
+        break;
+      }
+    }
+
+    if (!hit) {
+      survivors.push(bullet);
+    }
+  }
+
+  state.bullets = survivors;
+}
+
+// ====================== 其余函数保持不变 ======================
+
 function updateAmmo(entity, dt) {
   entity.fireCooldown = Math.max(0, entity.fireCooldown - dt);
-
   if (entity.ammo > 0) {
     entity.reloadTimer = 0;
     return;
   }
-
   entity.reloadTimer += dt;
   if (entity.reloadTimer >= CONFIG.reloadDuration) {
     entity.ammo = CONFIG.maxAmmo;
@@ -60,148 +198,47 @@ function updateAmmo(entity, dt) {
 }
 
 function buildBullet(owner, target, shootDirection) {
-  let vector;
+  let vx = 1, vy = 0;
   if (owner.team === 'player' && shootDirection) {
-    // 根据射击方向发射子弹
     switch (shootDirection) {
-      case 'up':
-        vector = { x: 0, y: -1 };
-        break;
-      case 'down':
-        vector = { x: 0, y: 1 };
-        break;
-      case 'left':
-        vector = { x: -1, y: 0 };
-        break;
-      case 'right':
-      default:
-        vector = { x: 1, y: 0 };
-        break;
+      case 'up':    vx=0; vy=-1; break;
+      case 'down':  vx=0; vy=1; break;
+      case 'left':  vx=-1; vy=0; break;
+      case 'right': vx=1; vy=0; break;
     }
   } else {
-    // AI子弹或无方向时朝向目标
-    vector = normalize(target.x - owner.x, target.y - owner.y);
+    const dx = target.x - owner.x;
+    const dy = target.y - owner.y;
+    const len = Math.sqrt(dx*dx + dy*dy) || 1;
+    vx = dx / len; vy = dy / len;
   }
+
   return {
     ownerId: owner.id,
     ownerTeam: owner.team,
-    x: owner.x + vector.x * (owner.radius + 0.18),
-    y: owner.y + vector.y * (owner.radius + 0.18),
-    vx: vector.x * CONFIG.bulletSpeed,
-    vy: vector.y * CONFIG.bulletSpeed,
+    x: owner.x + vx * (owner.radius + 0.3),
+    y: owner.y + vy * (owner.radius + 0.3),
+    vx: vx * CONFIG.bulletSpeed,
+    vy: vy * CONFIG.bulletSpeed,
     damage: owner.atk,
     radius: CONFIG.bulletRadius,
     lifetime: CONFIG.bulletLifetime,
+    skillEffect: owner.activeSkill || null,
   };
 }
 
 function tryShoot(entity, command, bullets, fallbackTarget, state) {
-  if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) {
-    return;
-  }
-
+  if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) return;
   const target = command.target || fallbackTarget;
-  if (!target) {
-    return;
-  }
+  if (!target) return;
 
   const bullet = buildBullet(entity, target, command.shootDirection);
   bullets.push(bullet);
-
-  // 处理技能子弹
   processSkillBullet(entity, bullet, state);
 
   entity.ammo -= 1;
   entity.fireCooldown = CONFIG.fireCooldown;
   entity.action = 'shoot';
-}
-
-function applyDamage(target, damage) {
-  const reduced = Math.max(1, damage - target.def);
-  target.hp = Math.max(0, target.hp - reduced);
-}
-
-function updateBullets(state, dt) {
-  const survivors = [];
-
-  state.bullets.forEach((bullet) => {
-    // 更新子弹生命周期
-    if (bullet.skillEffect !== 'ping_pong') {
-      bullet.lifetime -= dt;
-      if (bullet.lifetime <= 0) {
-        return;
-      }
-    }
-
-    // 更新布尔运动子弹
-    updateBullet(bullet, dt, state);
-
-    bullet.x += bullet.vx * dt;
-    bullet.y += bullet.vy * dt;
-
-    // 确保子弹不离开显示区域
-    const mapWidth = state.map[0].length;
-    const mapHeight = state.map.length;
-
-    // 对于布尔运动子弹，确保在显示区域内
-    if (bullet.skillEffect === 'boolean_motion') {
-      bullet.x = clamp(bullet.x, 0.5, mapWidth - 1.5);
-      bullet.y = clamp(bullet.y, 0.5, mapHeight - 1.5);
-    }
-
-    const tileX = Math.round(bullet.x);
-    const tileY = Math.round(bullet.y);
-    const tile = state.map[tileY] && state.map[tileY][tileX];
-
-    // 处理乒乓球反弹
-    if (!handleBounce(bullet, state)) {
-      return;
-    }
-
-    if (tile === TILE_WALL) {
-      // 非乒乓球和非布尔运动子弹碰到墙壁消失
-      if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
-        return;
-      }
-    }
-
-    if (tile === TILE_COVER) {
-      state.map[tileY][tileX] = 0;
-      // 非乒乓球和非布尔运动子弹碰到掩体消失
-      if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
-        return;
-      }
-    }
-
-    const targets = [state.entities.player, state.entities.enemy];
-    for (let i = 0; i < targets.length; i += 1) {
-      const target = targets[i];
-
-      // 处理乒乓球手的反弹攻击
-      if (target.id !== bullet.ownerId && reflectAttack(target, bullet)) {
-        survivors.push(bullet);
-        return;
-      }
-
-      if (target.id === bullet.ownerId || target.hp <= 0) {
-        continue;
-      }
-
-      const dx = target.x - bullet.x;
-      const dy = target.y - bullet.y;
-      const distanceSq = dx * dx + dy * dy;
-      const hitRadius = target.radius + bullet.radius;
-      if (distanceSq <= hitRadius * hitRadius) {
-        applyDamage(target, bullet.damage);
-        target.action = ACTION_IDLE;
-        return;
-      }
-    }
-
-    survivors.push(bullet);
-  });
-
-  state.bullets = survivors;
 }
 
 function updateWorld(state, commands, dt) {

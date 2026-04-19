@@ -1,5 +1,5 @@
 {
-  "libVersion": "3.15.2",
+  "libVersion": "3.15.0",
   "projectname": "ShoTai",
   "setting": {
     "urlCheck": true,
@@ -16,6 +16,7 @@
     "showES6CompileOption": false,
     "checkInvalidKey": true,
     "ignoreDevUnusedFiles": true,
-    "bigPackageSizeSupport": false
+    "bigPackageSizeSupport": false,
+    "useApiHostProcess": true
   }
 }
