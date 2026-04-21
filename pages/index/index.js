@@ -235,8 +235,8 @@ Page({
     ctx.fillStyle = entity.color;
     ctx.beginPath();
     ctx.arc(
-      offsetX + entity.x * cellSize,
-      offsetY + entity.y * cellSize,
+      offsetX + (entity.x + 0.5) * cellSize,
+      offsetY + (entity.y + 0.5) * cellSize,
       entity.radius * cellSize,
       0,
       Math.PI * 2
@@ -261,8 +261,8 @@ Page({
     }
     ctx.beginPath();
     ctx.arc(
-      offsetX + bullet.x * cellSize,
-      offsetY + bullet.y * cellSize,
+      offsetX + (bullet.x + 0.5) * cellSize,
+      offsetY + (bullet.y + 0.5) * cellSize,
       Math.max(2, (bullet.radius || 0.18) * cellSize * 1.4),
       0,
       Math.PI * 2
