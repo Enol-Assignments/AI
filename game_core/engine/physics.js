@@ -25,9 +25,9 @@ function isWallOrCover(map, x, y) {
   return tile === TILE_WALL || tile === TILE_COVER;
 }
 
-// 多点采样检测 + 破坏掩体（针对布尔运动加强版）
+// 多点采样检测 + 破坏掩体
 function handleBulletWallAndCover(bullet, map) {
-  const samples = 10;   // 针对高速追踪子弹增加采样
+  const samples = 10;
   const prevX = bullet.x - bullet.vx * 0.025;
   const prevY = bullet.y - bullet.vy * 0.025;
 
@@ -47,7 +47,6 @@ function handleBulletWallAndCover(bullet, map) {
       if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
         return false;
       }
-      // 布尔运动碰到墙也消失
       if (bullet.skillEffect === 'boolean_motion') {
         return false;
       }
@@ -56,7 +55,6 @@ function handleBulletWallAndCover(bullet, map) {
     if (tile === TILE_COVER) {
       map[ty][tx] = TILE_EMPTY;
 
-      // 所有技能子弹打到箱子都消失
       if (bullet.skillEffect === 'ping_pong' || bullet.skillEffect === 'boolean_motion') {
         return false;
       }
@@ -66,29 +64,40 @@ function handleBulletWallAndCover(bullet, map) {
   return true;
 }
 
-// ====================== 实体移动 ======================
+// ====================== 实体碰撞 - 修复边缘透明墙问题 ======================
 
 function resolveEntityCollisions(entity, map) {
   const radius = toPixels(entity.radius || CONFIG.entityRadius);
   const ex = toPixels(entity.x);
   const ey = toPixels(entity.y);
+  const mapWidth = map[0].length;
+  const mapHeight = map.length;
 
-  for (let y = 0; y < map.length; y++) {
-    for (let x = 0; x < map[y].length; x++) {
+  for (let y = 0; y < mapHeight; y++) {
+    for (let x = 0; x < mapWidth; x++) {
       if (map[y][x] !== TILE_WALL && map[y][x] !== TILE_COVER) continue;
 
-      const rx = x * GRID_SIZE, ry = y * GRID_SIZE;
-      const closestX = Math.max(rx, Math.min(ex, rx + GRID_SIZE));
-      const closestY = Math.max(ry, Math.min(ey, ry + GRID_SIZE));
+      const rx = x * GRID_SIZE;
+      const ry = y * GRID_SIZE;
+      const rw = GRID_SIZE;
+      const rh = GRID_SIZE;
+
+      const closestX = Math.max(rx, Math.min(ex, rx + rw));
+      const closestY = Math.max(ry, Math.min(ey, ry + rh));
 
       const dx = ex - closestX;
       const dy = ey - closestY;
-      const distSq = dx*dx + dy*dy;
+      const distSq = dx * dx + dy * dy;
 
-      if (distSq < radius*radius && distSq > 0.0001) {
+      if (distSq < radius * radius && distSq > 0.0001) {
         const dist = Math.sqrt(distSq) || 0.001;
-        entity.x += (dx / dist) * (radius - dist + 3) / GRID_SIZE;
-        entity.y += (dy / dist) * (radius - dist + 3) / GRID_SIZE;
+
+        // 对地图最边缘的墙，推开力度减弱，避免“透明墙”感觉
+        const isEdgeWall = (x === 0 || x === mapWidth - 1 || y === 0 || y === mapHeight - 1);
+        const pushFactor = isEdgeWall ? 0.6 : 1.0;   // 边缘墙推开力度减小
+
+        entity.x += (dx / dist) * (radius - dist + 2) * pushFactor / GRID_SIZE;
+        entity.y += (dy / dist) * (radius - dist + 2) * pushFactor / GRID_SIZE;
       }
     }
   }
@@ -96,7 +105,8 @@ function resolveEntityCollisions(entity, map) {
 
 function tryMove(entity, map, moveX, moveY, dt) {
   if (!moveX && !moveY) return;
-  const len = Math.sqrt(moveX*moveX + moveY*moveY) || 1;
+
+  const len = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
   const vx = moveX / len;
   const vy = moveY / len;
 
@@ -107,13 +117,16 @@ function tryMove(entity, map, moveX, moveY, dt) {
   for (let i = 0; i < steps; i++) {
     entity.x += vx * step;
     entity.y += vy * step;
-    entity.x = Math.max(1.0, Math.min(entity.x, map[0].length - 2));
-    entity.y = Math.max(1.0, Math.min(entity.y, map.length - 2));
+
+    // 放宽边界限制，允许更靠近边缘
+    entity.x = Math.max(0.5, Math.min(entity.x, map[0].length - 0.5));
+    entity.y = Math.max(0.5, Math.min(entity.y, map.length - 0.5));
+
     resolveEntityCollisions(entity, map);
   }
 }
 
-// ====================== 子弹更新 - 已优化顺序 ======================
+// ====================== 子弹更新 ======================
 
 function updateBullets(state, dt) {
   const survivors = [];
@@ -121,34 +134,28 @@ function updateBullets(state, dt) {
   for (let i = 0; i < state.bullets.length; i++) {
     const bullet = state.bullets[i];
 
-    // 生命周期管理
     if (bullet.skillEffect !== 'ping_pong') {
       bullet.lifetime = (bullet.lifetime || CONFIG.bulletLifetime) - dt;
       if (bullet.lifetime <= 0) continue;
     }
 
-    // 移动子弹
     bullet.x += bullet.vx * dt;
     bullet.y += bullet.vy * dt;
 
-    // === 1. 强制墙和掩体碰撞检测（所有子弹都必须先走这里）===
     if (!handleBulletWallAndCover(bullet, state.map)) {
-      continue;   // 子弹消失（包括打到箱子的乒乓球）
+      continue;
     }
 
-    // === 2. 布尔运动专用追踪更新（必须放在墙检测之后）===
     if (bullet.skillEffect === 'boolean_motion' && typeof updateBullet === 'function') {
       updateBullet(bullet, dt, state);
     }
 
-    // === 3. 乒乓球专用反弹处理（放在墙检测之后）===
     if (bullet.skillEffect === 'ping_pong' && typeof handleBounce === 'function') {
       if (!handleBounce(bullet, state)) {
-        continue;                 // handleBounce 返回 false 时子弹消失
+        continue;
       }
     }
 
-    // === 4. 子弹击中实体检测 ===
     let hit = false;
     const targets = [state.entities.player, state.entities.enemy];
 
