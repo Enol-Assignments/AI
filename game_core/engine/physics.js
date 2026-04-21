@@ -4,7 +4,6 @@ const {
   TILE_COVER,
   TILE_WALL,
   TILE_EMPTY,
-  GRID_SIZE,
 } = require('../constants');
 
 const { processSkillBullet } = require('../skills/skillManager');
@@ -13,16 +12,22 @@ const { updateBullet } = require('../skills/booleanMotion');
 
 // ====================== 工具函数 ======================
 
-function toPixels(val) {
-  return val * GRID_SIZE;
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function isWallOrCover(map, x, y) {
-  const tx = Math.floor(x);
-  const ty = Math.floor(y);
-  if (!map[ty] || map[ty][tx] === undefined) return true;
-  const tile = map[ty][tx];
-  return tile === TILE_WALL || tile === TILE_COVER;
+function normalize(x, y) {
+  const length = Math.sqrt(x * x + y * y) || 1;
+  return { x: x / length, y: y / length };
+}
+
+function isBlocked(map, x, y) {
+  const tileX = Math.round(x);
+  const tileY = Math.round(y);
+  return !map[tileY]
+    || map[tileY][tileX] === undefined
+    || map[tileY][tileX] === TILE_WALL
+    || map[tileY][tileX] === TILE_COVER;
 }
 
 // 多点采样检测 + 破坏掩体
@@ -64,65 +69,22 @@ function handleBulletWallAndCover(bullet, map) {
   return true;
 }
 
-// ====================== 实体碰撞 - 修复边缘透明墙问题 ======================
-
-function resolveEntityCollisions(entity, map) {
-  const radius = toPixels(entity.radius || CONFIG.entityRadius);
-  const ex = toPixels(entity.x);
-  const ey = toPixels(entity.y);
-  const mapWidth = map[0].length;
-  const mapHeight = map.length;
-
-  for (let y = 0; y < mapHeight; y++) {
-    for (let x = 0; x < mapWidth; x++) {
-      if (map[y][x] !== TILE_WALL && map[y][x] !== TILE_COVER) continue;
-
-      const rx = x * GRID_SIZE;
-      const ry = y * GRID_SIZE;
-      const rw = GRID_SIZE;
-      const rh = GRID_SIZE;
-
-      const closestX = Math.max(rx, Math.min(ex, rx + rw));
-      const closestY = Math.max(ry, Math.min(ey, ry + rh));
-
-      const dx = ex - closestX;
-      const dy = ey - closestY;
-      const distSq = dx * dx + dy * dy;
-
-      if (distSq < radius * radius && distSq > 0.0001) {
-        const dist = Math.sqrt(distSq) || 0.001;
-
-        // 对地图最边缘的墙，推开力度减弱，避免“透明墙”感觉
-        const isEdgeWall = (x === 0 || x === mapWidth - 1 || y === 0 || y === mapHeight - 1);
-        const pushFactor = isEdgeWall ? 0.6 : 1.0;   // 边缘墙推开力度减小
-
-        entity.x += (dx / dist) * (radius - dist + 2) * pushFactor / GRID_SIZE;
-        entity.y += (dy / dist) * (radius - dist + 2) * pushFactor / GRID_SIZE;
-      }
-    }
-  }
-}
-
 function tryMove(entity, map, moveX, moveY, dt) {
-  if (!moveX && !moveY) return;
+  if (!moveX && !moveY) {
+    return;
+  }
 
-  const len = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
-  const vx = moveX / len;
-  const vy = moveY / len;
-
+  const vector = normalize(moveX, moveY);
   const distance = entity.speed * dt;
-  const steps = 8;
-  const step = distance / steps;
+  const targetX = entity.x + vector.x * distance;
+  const targetY = entity.y + vector.y * distance;
 
-  for (let i = 0; i < steps; i++) {
-    entity.x += vx * step;
-    entity.y += vy * step;
+  if (!isBlocked(map, targetX, entity.y)) {
+    entity.x = clamp(targetX, 1, map[0].length - 2);
+  }
 
-    // 放宽边界限制，允许更靠近边缘
-    entity.x = Math.max(0.5, Math.min(entity.x, map[0].length - 0.5));
-    entity.y = Math.max(0.5, Math.min(entity.y, map.length - 0.5));
-
-    resolveEntityCollisions(entity, map);
+  if (!isBlocked(map, entity.x, targetY)) {
+    entity.y = clamp(targetY, 1, map.length - 2);
   }
 }
 
@@ -131,12 +93,14 @@ function tryMove(entity, map, moveX, moveY, dt) {
 function updateBullets(state, dt) {
   const survivors = [];
 
-  for (let i = 0; i < state.bullets.length; i++) {
+  for (let i = 0; i < state.bullets.length; i += 1) {
     const bullet = state.bullets[i];
 
     if (bullet.skillEffect !== 'ping_pong') {
       bullet.lifetime = (bullet.lifetime || CONFIG.bulletLifetime) - dt;
-      if (bullet.lifetime <= 0) continue;
+      if (bullet.lifetime <= 0) {
+        continue;
+      }
     }
 
     bullet.x += bullet.vx * dt;
@@ -159,12 +123,15 @@ function updateBullets(state, dt) {
     let hit = false;
     const targets = [state.entities.player, state.entities.enemy];
 
-    for (let target of targets) {
-      if (target.id === bullet.ownerId || target.hp <= 0) continue;
+    for (let j = 0; j < targets.length; j += 1) {
+      const target = targets[j];
+      if (target.id === bullet.ownerId || target.hp <= 0) {
+        continue;
+      }
 
       const dx = target.x - bullet.x;
       const dy = target.y - bullet.y;
-      const distSq = dx*dx + dy*dy;
+      const distSq = dx * dx + dy * dy;
       const hitR = (target.radius || CONFIG.entityRadius) + (bullet.radius || CONFIG.bulletRadius);
 
       if (distSq <= hitR * hitR) {
@@ -189,14 +156,13 @@ function updateBullets(state, dt) {
   state.bullets = survivors;
 }
 
-// ====================== 其余函数保持不变 ======================
-
 function updateAmmo(entity, dt) {
   entity.fireCooldown = Math.max(0, entity.fireCooldown - dt);
   if (entity.ammo > 0) {
     entity.reloadTimer = 0;
     return;
   }
+
   entity.reloadTimer += dt;
   if (entity.reloadTimer >= CONFIG.reloadDuration) {
     entity.ammo = CONFIG.maxAmmo;
@@ -205,19 +171,36 @@ function updateAmmo(entity, dt) {
 }
 
 function buildBullet(owner, target, shootDirection) {
-  let vx = 1, vy = 0;
+  let vx = 1;
+  let vy = 0;
+
   if (owner.team === 'player' && shootDirection) {
     switch (shootDirection) {
-      case 'up':    vx=0; vy=-1; break;
-      case 'down':  vx=0; vy=1; break;
-      case 'left':  vx=-1; vy=0; break;
-      case 'right': vx=1; vy=0; break;
+      case 'up':
+        vx = 0;
+        vy = -1;
+        break;
+      case 'down':
+        vx = 0;
+        vy = 1;
+        break;
+      case 'left':
+        vx = -1;
+        vy = 0;
+        break;
+      case 'right':
+        vx = 1;
+        vy = 0;
+        break;
+      default:
+        break;
     }
   } else {
     const dx = target.x - owner.x;
     const dy = target.y - owner.y;
-    const len = Math.sqrt(dx*dx + dy*dy) || 1;
-    vx = dx / len; vy = dy / len;
+    const vector = normalize(dx, dy);
+    vx = vector.x;
+    vy = vector.y;
   }
 
   return {
@@ -235,9 +218,14 @@ function buildBullet(owner, target, shootDirection) {
 }
 
 function tryShoot(entity, command, bullets, fallbackTarget, state) {
-  if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) return;
+  if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) {
+    return;
+  }
+
   const target = command.target || fallbackTarget;
-  if (!target) return;
+  if (!target) {
+    return;
+  }
 
   const bullet = buildBullet(entity, target, command.shootDirection);
   bullets.push(bullet);

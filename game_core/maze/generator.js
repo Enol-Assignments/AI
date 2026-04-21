@@ -25,6 +25,36 @@ function markSpawnArea(map, cx, cy) {
   }
 }
 
+function hasPathBetween(map, start, target) {
+  const queue = [start];
+  const visited = new Set([`${start.x},${start.y}`]);
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current.x === target.x && current.y === target.y) {
+      return true;
+    }
+
+    DIRECTIONS.forEach((dir) => {
+      const nextX = current.x + dir.x;
+      const nextY = current.y + dir.y;
+      const key = `${nextX},${nextY}`;
+      if (visited.has(key)) {
+        return;
+      }
+
+      if (!map[nextY] || map[nextY][nextX] !== TILE_EMPTY) {
+        return;
+      }
+
+      visited.add(key);
+      queue.push({ x: nextX, y: nextY });
+    });
+  }
+
+  return false;
+}
+
 /**
  * 生成一张全连通的迷宫地图。
  * @param {number} width
@@ -82,6 +112,9 @@ function generateMaze(width, height, breakRate) {
     }
   }
 
+  const playerSpawn = { x: 1, y: 1 };
+  const enemySpawn = { x: mazeWidth - 2, y: mazeHeight - 2 };
+
   for (let y = 1; y < mazeHeight - 1; y += 1) {
     for (let x = 1; x < mazeWidth - 1; x += 1) {
       if (map[y][x] !== TILE_EMPTY) {
@@ -91,12 +124,15 @@ function generateMaze(width, height, breakRate) {
       const isSpawnZone = (x <= 2 && y <= 2) || (x >= mazeWidth - 3 && y >= mazeHeight - 3);
       if (!isSpawnZone && Math.random() < 0.08) {
         map[y][x] = TILE_COVER;
+        if (!hasPathBetween(map, playerSpawn, enemySpawn)) {
+          map[y][x] = TILE_EMPTY;
+        }
       }
     }
   }
 
-  markSpawnArea(map, 1, 1);
-  markSpawnArea(map, mazeWidth - 2, mazeHeight - 2);
+  markSpawnArea(map, playerSpawn.x, playerSpawn.y);
+  markSpawnArea(map, enemySpawn.x, enemySpawn.y);
   return map;
 }
 
