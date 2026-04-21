@@ -4,11 +4,23 @@ const {
   ACTION_MOVE,
   ACTION_SHOOT,
   CONFIG,
+  SKILL_ALGORITHMIC_DAMAGE,
+  SKILL_BOOLEAN_MOTION,
+  SKILL_PING_PONG,
   TILE_COVER,
   TILE_WALL,
-  DIRECTIONS,
 } = require('../constants');
 const { findShortestPath } = require('./pathfinding');
+
+const MODE_APPROACH = 'approach';
+const MODE_HOLD = 'hold';
+const MODE_RETREAT = 'retreat';
+const MODE_DODGE = 'dodge';
+
+const MODE_LOCK_TIME = 0.18;
+const REPATH_INTERVAL = 0.22;
+const TARGET_EPSILON = 0.32;
+const CELL_EPSILON = 0.18;
 
 function distanceSq(a, b) {
   const dx = a.x - b.x;
@@ -19,6 +31,50 @@ function distanceSq(a, b) {
 function normalize(x, y) {
   const length = Math.sqrt(x * x + y * y) || 1;
   return { x: x / length, y: y / length };
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function toGrid(position) {
+  return {
+    x: Math.round(position.x),
+    y: Math.round(position.y),
+  };
+}
+
+function isWalkable(map, x, y) {
+  return map[y] && map[y][x] !== undefined && map[y][x] !== TILE_WALL && map[y][x] !== TILE_COVER;
+}
+
+function isNear(a, b, epsilon) {
+  return Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon;
+}
+
+function sameCell(a, b) {
+  return Boolean(a && b && a.x === b.x && a.y === b.y);
+}
+
+function ensureAiMemory(aiState) {
+  if (!aiState.aiMemory) {
+    aiState.aiMemory = {
+      mode: MODE_APPROACH,
+      lockTimer: 0,
+      repathTimer: 0,
+      targetCell: null,
+      path: [],
+      dodgeVector: { x: 0, y: 0 },
+      strafeSign: Math.random() > 0.5 ? 1 : -1,
+    };
+  }
+  return aiState.aiMemory;
+}
+
+function updateMemoryTimers(memory) {
+  const dt = CONFIG.tickMs / 1000;
+  memory.lockTimer = Math.max(0, (memory.lockTimer || 0) - dt);
+  memory.repathTimer = Math.max(0, (memory.repathTimer || 0) - dt);
 }
 
 function hasLineOfSight(map, from, to) {
@@ -41,20 +97,62 @@ function hasLineOfSight(map, from, to) {
   return true;
 }
 
+function getSkillProfile(aiState) {
+  switch (aiState.activeSkill) {
+    case SKILL_PING_PONG:
+      return { idealMin: 4.5, idealMax: 8.5 };
+    case SKILL_BOOLEAN_MOTION:
+      return { idealMin: 3.5, idealMax: 7.2 };
+    case SKILL_ALGORITHMIC_DAMAGE:
+      return { idealMin: 3.2, idealMax: 6.8 };
+    default:
+      return { idealMin: 3.8, idealMax: 7.5 };
+  }
+}
+
 function findSafestCell(map, aiState, playerState) {
-  let bestCell = { x: Math.round(aiState.x), y: Math.round(aiState.y) };
+  let bestCell = toGrid(aiState);
   let bestScore = -Infinity;
 
   for (let y = 1; y < map.length - 1; y += 1) {
     for (let x = 1; x < map[0].length - 1; x += 1) {
-      if (map[y][x] === TILE_WALL || map[y][x] === TILE_COVER) {
+      if (!isWalkable(map, x, y)) {
         continue;
       }
 
       const cell = { x, y };
       const farScore = Math.abs(playerState.x - x) + Math.abs(playerState.y - y);
       const blockedBonus = hasLineOfSight(map, cell, playerState) ? 0 : 6;
-      const score = farScore + blockedBonus;
+      const moveCost = Math.sqrt(distanceSq(cell, aiState)) * 0.18;
+      const score = farScore + blockedBonus - moveCost;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestCell = cell;
+      }
+    }
+  }
+
+  return bestCell;
+}
+
+function findApproachCell(map, aiState, playerState, skillProfile) {
+  let bestCell = toGrid(aiState);
+  let bestScore = -Infinity;
+
+  for (let y = 1; y < map.length - 1; y += 1) {
+    for (let x = 1; x < map[0].length - 1; x += 1) {
+      if (!isWalkable(map, x, y)) {
+        continue;
+      }
+
+      const cell = { x, y };
+      const distance = Math.sqrt(distanceSq(cell, playerState));
+      const losBonus = hasLineOfSight(map, cell, playerState) ? 7 : 0;
+      const rangePenalty = Math.abs(distance - skillProfile.idealMax);
+      const moveCost = Math.sqrt(distanceSq(cell, aiState)) * 0.12;
+      const score = losBonus - rangePenalty - moveCost;
+
       if (score > bestScore) {
         bestScore = score;
         bestCell = cell;
@@ -67,7 +165,7 @@ function findSafestCell(map, aiState, playerState) {
 
 function predictIncomingBullet(aiState, bullets) {
   let closestThreat = null;
-  let closestDistance = Infinity;
+  let closestScore = Infinity;
 
   for (let i = 0; i < bullets.length; i += 1) {
     const bullet = bullets[i];
@@ -75,28 +173,136 @@ function predictIncomingBullet(aiState, bullets) {
       continue;
     }
 
-    // 更精确的子弹轨迹预测
-    const predictionTime = 0.4;
-    const futureX = bullet.x + bullet.vx * predictionTime;
-    const futureY = bullet.y + bullet.vy * predictionTime;
+    const toAiX = aiState.x - bullet.x;
+    const toAiY = aiState.y - bullet.y;
+    const bulletSpeedSq = bullet.vx * bullet.vx + bullet.vy * bullet.vy;
+    if (bulletSpeedSq <= 0.0001) {
+      continue;
+    }
 
-    // 计算子弹到AI的距离
-    const distance = distanceSq(aiState, { x: futureX, y: futureY });
+    const projection = (toAiX * bullet.vx + toAiY * bullet.vy) / bulletSpeedSq;
+    if (projection < 0 || projection > 0.45) {
+      continue;
+    }
 
-    // 检查子弹是否在AI的移动路径上
-    const dx = futureX - aiState.x;
-    const dy = futureY - aiState.y;
-    const bulletSpeed = Math.sqrt(bullet.vx * bullet.vx + bullet.vy * bullet.vy);
-    const aiToBulletDist = Math.sqrt(dx * dx + dy * dy);
-    const timeToImpact = aiToBulletDist / bulletSpeed;
+    const closestPoint = {
+      x: bullet.x + bullet.vx * projection,
+      y: bullet.y + bullet.vy * projection,
+    };
+    const nearDistanceSq = distanceSq(aiState, closestPoint);
+    const bulletRadius = bullet.radius || CONFIG.bulletRadius;
+    const hitRadius = aiState.radius + bulletRadius + 0.18;
+    if (nearDistanceSq > hitRadius * hitRadius) {
+      continue;
+    }
 
-    // 只考虑即将击中的子弹
-    if (timeToImpact < 0.5 && distance < closestDistance) {
+    if (projection < closestScore) {
+      closestScore = projection;
       closestThreat = bullet;
-      closestDistance = distance;
     }
   }
+
   return closestThreat;
+}
+
+function chooseMode(aiState, playerState, map, bullets, memory) {
+  const skillProfile = getSkillProfile(aiState);
+  const threat = predictIncomingBullet(aiState, bullets);
+  if (threat) {
+    return { mode: MODE_DODGE, threat, skillProfile };
+  }
+
+  const canSeePlayer = hasLineOfSight(map, aiState, playerState);
+  const distance = Math.sqrt(distanceSq(aiState, playerState));
+  const lowHp = aiState.hp <= aiState.maxHp * 0.3;
+  const lowAmmo = aiState.ammo <= 1;
+
+  if (memory.lockTimer > 0 && memory.mode !== MODE_DODGE) {
+    return { mode: memory.mode, canSeePlayer, distance, skillProfile, lowHp, lowAmmo };
+  }
+
+  if (lowHp || lowAmmo || distance < skillProfile.idealMin - 0.5) {
+    return { mode: MODE_RETREAT, canSeePlayer, distance, skillProfile, lowHp, lowAmmo };
+  }
+
+  if (canSeePlayer && distance <= skillProfile.idealMax + 0.3) {
+    return { mode: MODE_HOLD, canSeePlayer, distance, skillProfile, lowHp, lowAmmo };
+  }
+
+  return { mode: MODE_APPROACH, canSeePlayer, distance, skillProfile, lowHp, lowAmmo };
+}
+
+function chooseDodgeVector(aiState, playerState, threat, map, memory) {
+  const lateralOptions = [
+    normalize(-threat.vy, threat.vx),
+    normalize(threat.vy, -threat.vx),
+  ];
+  let bestVector = lateralOptions[0];
+  let bestScore = -Infinity;
+
+  lateralOptions.forEach((vector) => {
+    const probe = {
+      x: aiState.x + vector.x * 1.2,
+      y: aiState.y + vector.y * 1.2,
+    };
+    const probeCell = toGrid(probe);
+    if (!isWalkable(map, probeCell.x, probeCell.y)) {
+      return;
+    }
+
+    const coverBonus = hasLineOfSight(map, probe, playerState) ? 0 : 4;
+    const spacingBonus = Math.sqrt(distanceSq(probe, playerState));
+    const score = coverBonus + spacingBonus;
+    if (score > bestScore) {
+      bestScore = score;
+      bestVector = vector;
+    }
+  });
+
+  memory.dodgeVector = bestVector;
+  memory.mode = MODE_DODGE;
+  memory.lockTimer = 0.12;
+  return bestVector;
+}
+
+function updatePathIfNeeded(map, aiState, targetCell, memory) {
+  if (!targetCell) {
+    memory.targetCell = null;
+    memory.path = [];
+    return;
+  }
+
+  const currentCell = toGrid(aiState);
+  const needsNewPath = !sameCell(memory.targetCell, targetCell)
+    || memory.repathTimer <= 0
+    || !memory.path
+    || memory.path.length === 0;
+
+  if (!needsNewPath) {
+    return;
+  }
+
+  memory.targetCell = targetCell;
+  memory.path = findShortestPath(map, currentCell, targetCell);
+  memory.repathTimer = REPATH_INTERVAL;
+}
+
+function consumeReachedSteps(aiState, memory) {
+  while (memory.path && memory.path.length > 0 && isNear(aiState, memory.path[0], CELL_EPSILON)) {
+    memory.path.shift();
+  }
+}
+
+function buildMoveCommand(mode, moveVector, target, memory) {
+  memory.mode = mode;
+  memory.lockTimer = MODE_LOCK_TIME;
+  return {
+    type: ACTION_MOVE,
+    moveX: moveVector.x,
+    moveY: moveVector.y,
+    shoot: false,
+    target,
+  };
 }
 
 /**
@@ -108,163 +314,76 @@ function predictIncomingBullet(aiState, bullets) {
  * @returns {{type:string, moveX:number, moveY:number, shoot:boolean, target?:{x:number,y:number}}}
  */
 function tickBehaviorTree(aiState, playerState, bullets, map) {
-  const threat = predictIncomingBullet(aiState, bullets);
-  if (threat) {
-    // 更智能的闪避方向，考虑移动到掩体后面
-    const dodgeVector = normalize(-threat.vy, threat.vx);
+  const memory = ensureAiMemory(aiState);
+  updateMemoryTimers(memory);
 
-    // 尝试找到掩体方向
-    let bestDodge = dodgeVector;
-    let bestCoverScore = -Infinity;
+  const decision = chooseMode(aiState, playerState, map, bullets, memory);
+  const canShoot = aiState.ammo > 0 && aiState.fireCooldown <= 0;
 
-    DIRECTIONS.forEach(dir => {
-      const testX = aiState.x + dir.x * 2;
-      const testY = aiState.y + dir.y * 2;
-      const tileX = Math.round(testX);
-      const tileY = Math.round(testY);
-
-      if (map[tileY] && (map[tileY][tileX] === TILE_COVER || map[tileY][tileX] === TILE_WALL)) {
-        const coverScore = 10 - distanceSq({ x: testX, y: testY }, playerState);
-        if (coverScore > bestCoverScore) {
-          bestCoverScore = coverScore;
-          bestDodge = dir;
-        }
-      }
-    });
-
+  if (decision.mode === MODE_DODGE) {
+    const dodgeVector = chooseDodgeVector(aiState, playerState, decision.threat, map, memory);
     return {
       type: ACTION_DODGE,
-      moveX: bestDodge.x,
-      moveY: bestDodge.y,
+      moveX: clamp(dodgeVector.x, -1, 1),
+      moveY: clamp(dodgeVector.y, -1, 1),
       shoot: false,
+      target: { x: playerState.x, y: playerState.y },
     };
   }
 
-  const canSeePlayer = hasLineOfSight(map, aiState, playerState);
-  const lowHp = aiState.hp <= aiState.maxHp * 0.35;
-  const ammoLow = aiState.ammo <= 2;
+  if (decision.mode === MODE_HOLD) {
+    memory.path = [];
+    memory.targetCell = null;
+    memory.mode = MODE_HOLD;
+    memory.lockTimer = MODE_LOCK_TIME;
 
-  // 智能射击决策
-  if (canSeePlayer && aiState.ammo > 0) {
-    // 计算与玩家的距离
-    const distance = Math.sqrt(distanceSq(aiState, playerState));
-
-    // 近距离优先射击
-    if (distance < 8 || (!ammoLow && distance < 15)) {
-      const attackVector = normalize(playerState.x - aiState.x, playerState.y - aiState.y);
-      return {
-        type: ACTION_SHOOT,
-        moveX: attackVector.x * 0.35,
-        moveY: attackVector.y * 0.35,
-        shoot: true,
-        target: { x: playerState.x, y: playerState.y },
-      };
-    }
-  }
-
-  // 计算与玩家的距离
-  const distanceToPlayer = Math.sqrt(distanceSq(aiState, playerState));
-  const safeDistance = 5; // 保持5个子弹的距离，离玩家更远一些
-
-  // 智能移动策略
-  let targetCell;
-  if (lowHp) {
-    // 低血量时寻找掩体
-    targetCell = findSafestCell(map, aiState, playerState);
-  } else if (ammoLow) {
-    // 低弹药时寻找安全位置，等待 reload
-    targetCell = findSafestCell(map, aiState, playerState);
-  } else if (!canSeePlayer) {
-    // 看不到玩家时，向玩家位置移动
-    targetCell = {
-      x: Math.round(playerState.x),
-      y: Math.round(playerState.y),
+    const attackVector = normalize(playerState.x - aiState.x, playerState.y - aiState.y);
+    const strafeVector = {
+      x: -attackVector.y * memory.strafeSign * 0.12,
+      y: attackVector.x * memory.strafeSign * 0.12,
     };
-  } else if (distanceToPlayer < safeDistance) {
-    // 距离玩家太近时，寻找安全位置保持距离
-    targetCell = findSafestCell(map, aiState, playerState);
-  } else {
-    // 能看到玩家且距离合适时，寻找更好的射击位置
-    targetCell = findOptimalShootingPosition(map, aiState, playerState);
-  }
+    const probe = { x: aiState.x + strafeVector.x, y: aiState.y + strafeVector.y };
+    const probeCell = toGrid(probe);
+    const canStrafe = isWalkable(map, probeCell.x, probeCell.y);
 
-  const path = findShortestPath(map, aiState, targetCell);
-  const nextStep = path[0];
-
-  if (nextStep) {
-    const moveVector = normalize(nextStep.x - aiState.x, nextStep.y - aiState.y);
     return {
-      type: ACTION_MOVE,
-      moveX: moveVector.x,
-      moveY: moveVector.y,
-      shoot: canSeePlayer && aiState.ammo > 0,
-      target: nextStep,
+      type: canShoot ? ACTION_SHOOT : ACTION_IDLE,
+      moveX: canStrafe ? strafeVector.x : 0,
+      moveY: canStrafe ? strafeVector.y : 0,
+      shoot: canShoot,
+      target: { x: playerState.x, y: playerState.y },
     };
   }
 
-  // 随机移动作为 fallback
-  const fallback = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
+  const targetCell = decision.mode === MODE_RETREAT
+    ? findSafestCell(map, aiState, playerState)
+    : findApproachCell(map, aiState, playerState, decision.skillProfile);
+
+  updatePathIfNeeded(map, aiState, targetCell, memory);
+  consumeReachedSteps(aiState, memory);
+
+  const nextStep = memory.path && memory.path[0];
+  if (nextStep && !isNear(aiState, nextStep, TARGET_EPSILON)) {
+    const moveVector = normalize(nextStep.x - aiState.x, nextStep.y - aiState.y);
+    return buildMoveCommand(
+      decision.mode,
+      moveVector,
+      { x: playerState.x, y: playerState.y },
+      memory
+    );
+  }
+
+  memory.path = [];
+  memory.targetCell = null;
+  memory.mode = decision.mode;
+  memory.lockTimer = MODE_LOCK_TIME;
   return {
     type: ACTION_IDLE,
-    moveX: fallback.x * 0.1,
-    moveY: fallback.y * 0.1,
-    shoot: false,
+    moveX: 0,
+    moveY: 0,
+    shoot: canShoot && Boolean(decision.canSeePlayer),
+    target: { x: playerState.x, y: playerState.y },
   };
-}
-
-/**
- * 寻找最佳射击位置
- * @param {MapGrid} map
- * @param {EntityState} aiState
- * @param {EntityState} playerState
- * @returns {GridPosition}
- */
-function findOptimalShootingPosition(map, aiState, playerState) {
-  let bestCell = { x: Math.round(aiState.x), y: Math.round(aiState.y) };
-  let bestScore = -Infinity;
-
-  for (let y = 1; y < map.length - 1; y += 1) {
-    for (let x = 1; x < map[0].length - 1; x += 1) {
-      if (map[y][x] === TILE_WALL || map[y][x] === TILE_COVER) {
-        continue;
-      }
-
-      const cell = { x, y };
-      const hasLOS = hasLineOfSight(map, cell, playerState);
-      const distance = Math.sqrt(distanceSq(cell, playerState));
-      const distanceScore = Math.max(0, 10 - distance); // 中等距离最佳
-      const coverBonus = hasCoverNearby(map, cell) ? 5 : 0;
-      const score = (hasLOS ? 10 : 0) + distanceScore + coverBonus;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestCell = cell;
-      }
-    }
-  }
-
-  return bestCell;
-}
-
-/**
- * 检查附近是否有掩体
- * @param {MapGrid} map
- * @param {GridPosition} position
- * @returns {boolean}
- */
-function hasCoverNearby(map, position) {
-  for (let dy = -1; dy <= 1; dy += 1) {
-    for (let dx = -1; dx <= 1; dx += 1) {
-      if (dx === 0 && dy === 0) continue;
-
-      const tileX = Math.round(position.x + dx);
-      const tileY = Math.round(position.y + dy);
-      if (map[tileY] && (map[tileY][tileX] === TILE_COVER || map[tileY][tileX] === TILE_WALL)) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 module.exports = {

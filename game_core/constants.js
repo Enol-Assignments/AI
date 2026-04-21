@@ -16,8 +16,67 @@ const GAME_STATUS_FINISHED = 'finished';
 
 // 技能类型
 const SKILL_ALGORITHMIC_DAMAGE = 'algorithmic_damage';
+const SKILL_TIME_TRAVEL = 'time_travel';
 const SKILL_PING_PONG = 'ping_pong';
-const SKILL_BOOLEAN_MOTION = 'boolean_motion';
+const SKILL_BOOLEAN_MOTION = 'boolean_motion';   // 与你原来一致
+
+const DIRECTIONS = [
+  { x: 1, y: 0 },
+  { x: -1, y: 0 },
+  { x: 0, y: 1 },
+  { x: 0, y: -1 },
+];
+
+/**
+ * @typedef {0 | 1 | 2} TileType
+ * @typedef {TileType[][]} MapGrid
+ * @typedef {{x: number, y: number}} GridPosition
+ */
+
+// ====================== 新增：圆形碰撞支持（最小改动） ======================
+
+/** 
+ * 每个格子的像素大小（从 index.js 的 cellSize 计算得出）
+ * 在 physics.js 中用于把比例半径转为像素进行碰撞检测
+ */
+const GRID_SIZE = 30;   // ← 你可以根据实际绘制效果微调（20~40 之间较好）
+
+/** 实体碰撞半径（格子比例） - 用于碰撞检测，不影响绘制大小 */
+const ENTITY_RADIUS_RATIO = 0.35;   // 与你原来 entityRadius 一致
+
+/** 子弹碰撞半径（格子比例） - 用于碰撞检测 */
+const BULLET_RADIUS_RATIO = 0.18;   // 与你原来 bulletRadius 一致
+
+/** 墙壁碰撞厚度（像素） */
+const WALL_THICKNESS = GRID_SIZE;
+
+/** 可破坏掩体碰撞厚度（像素） */
+const COVER_THICKNESS = GRID_SIZE;
+
+/**
+ * @typedef {Object} EntityState
+ * @property {string} id
+ * @property {string} team
+ * @property {number} x                    // 中心点坐标（格子比例，0~mapWidth）
+ * @property {number} y
+ * @property {number} radius               // 半径（格子比例，例如 0.35）
+ * @property {number} hp
+ * @property {number} maxHp
+ * @property {number} atk
+ * @property {number} def
+ * @property {number} ammo
+ * @property {number} speed                // 移动速度（格子/秒）
+ * @property {number} vx                   // 当前速度分量（可选）
+ * @property {number} vy
+ * @property {number} fireCooldown
+ * @property {number} reloadTimer
+ * @property {string} action
+ * @property {string} color
+ * @property {string|null} activeSkill
+ * @property {number} skillCooldown
+ * @property {Object} skillData
+ * @property {Object|null} timeTravelClone
+ */
 
 const CONFIG = {
   mapWidth: 21,
@@ -26,22 +85,32 @@ const CONFIG = {
   rageTimeLimit: 60,
   rageDamagePerSecond: 3,
   tickMs: 16,
-  bulletSpeed: 7.5,
-  bulletRadius: 0.18,
-  bulletLifetime: 10, // 子弹生命周期（秒）
+  bulletSpeed: 7.5,           // 保持你原来的风格（格子/秒）
+  bulletLifetime: 10,
   fireCooldown: 0.38,
   reloadDuration: 1.2,
   maxAmmo: 6,
-  playerSpeed: 4.5,
+  playerSpeed: 4.5,           // 保持你原来的风格
   aiSpeed: 4.2,
-  entityRadius: 0.35,
+  
+  // 重要：使用比例半径（不改变你当前绘制的大小）
+  entityRadius: ENTITY_RADIUS_RATIO,
+  bulletRadius: BULLET_RADIUS_RATIO,
+  gridSize: GRID_SIZE,        // 新增，供 physics.js 使用
+
   coverHp: 2,
-  // 技能配置
+
+  // 技能配置（完全保留你原来的）
   skills: {
     [SKILL_ALGORITHMIC_DAMAGE]: {
       cooldown: 10,
       name: '算法伤害',
       description: '随机抽取三个0-9的数字进行乘法运算，结果为下一发子弹的攻击力'
+    },
+    [SKILL_TIME_TRAVEL]: {
+      cooldown: 18,
+      name: '时间穿越',
+      description: '召唤随机血量分身，本体血量降至分身值时触发替换'
     },
     [SKILL_PING_PONG]: {
       cooldown: 8,
@@ -57,65 +126,35 @@ const CONFIG = {
   }
 };
 
-const DIRECTIONS = [
-  { x: 1, y: 0 },
-  { x: -1, y: 0 },
-  { x: 0, y: 1 },
-  { x: 0, y: -1 },
-];
-
-/**
- * @typedef {0 | 1 | 2} TileType
- */
-
-/**
- * @typedef {TileType[][]} MapGrid
- */
-
-/**
- * @typedef {{x: number, y: number}} GridPosition
- */
-
-/**
- * @typedef {Object} EntityState
- * @property {string} id
- * @property {string} team
- * @property {number} x
- * @property {number} y
- * @property {number} hp
- * @property {number} maxHp
- * @property {number} atk
- * @property {number} def
- * @property {number} ammo
- * @property {number} speed
- * @property {number} fireCooldown
- * @property {number} reloadTimer
- * @property {number} radius
- * @property {string} action
- * @property {string} color
- * @property {string|null} activeSkill 当前激活的技能
- * @property {number} skillCooldown 技能冷却时间
- * @property {Object} skillData 技能相关数据
- * @property {Object|null} timeTravelClone 时间穿越技能的分身
- */
-
 module.exports = {
   TILE_EMPTY,
   TILE_WALL,
   TILE_COVER,
+
   TEAM_PLAYER,
   TEAM_ENEMY,
+
   ACTION_IDLE,
   ACTION_MOVE,
   ACTION_SHOOT,
   ACTION_DODGE,
+
   GAME_STATUS_READY,
   GAME_STATUS_RUNNING,
   GAME_STATUS_FINISHED,
-  // 技能类型
+
   SKILL_ALGORITHMIC_DAMAGE,
+  SKILL_TIME_TRAVEL,
   SKILL_PING_PONG,
   SKILL_BOOLEAN_MOTION,
+
   CONFIG,
   DIRECTIONS,
+
+  // 新增导出（供 physics.js 使用）
+  GRID_SIZE,
+  ENTITY_RADIUS_RATIO,
+  BULLET_RADIUS_RATIO,
+  WALL_THICKNESS,
+  COVER_THICKNESS,
 };

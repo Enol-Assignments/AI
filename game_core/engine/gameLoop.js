@@ -8,8 +8,9 @@ const {
   TEAM_ENEMY,
   TEAM_PLAYER,
 } = require('../constants');
+
 const { generateMaze } = require('../maze/generator');
-const { tickBehaviorTree } = require('../ai/behaviorTree');
+const { tickBehaviorTree } = require('../ai/behaviorTree');   // ← 正确路径
 const { updateWorld } = require('./physics');
 const { initSkills, updateSkills, activateSkill } = require('../skills/skillManager');
 

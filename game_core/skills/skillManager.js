@@ -10,10 +10,12 @@ const {
 const algorithmicDamageSkill = require('./algorithmicDamage');
 const pingPongSkill = require('./pingPong');
 const booleanMotionSkill = require('./booleanMotion');
+const timeTravelSkill = require('./timeTravel');
 
 // 技能实现映射
 const skillImplementations = {
   [SKILL_ALGORITHMIC_DAMAGE]: algorithmicDamageSkill,
+  [SKILL_TIME_TRAVEL]: timeTravelSkill,
   [SKILL_PING_PONG]: pingPongSkill,
   [SKILL_BOOLEAN_MOTION]: booleanMotionSkill,
 };
