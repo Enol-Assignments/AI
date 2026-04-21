@@ -16,6 +16,7 @@ const GAME_STATUS_FINISHED = 'finished';
 
 // 技能类型
 const SKILL_ALGORITHMIC_DAMAGE = 'algorithmic_damage';
+const SKILL_TIME_TRAVEL = 'time_travel';
 const SKILL_PING_PONG = 'ping_pong';
 const SKILL_BOOLEAN_MOTION = 'boolean_motion';   // 与你原来一致
 
@@ -106,6 +107,11 @@ const CONFIG = {
       name: '算法伤害',
       description: '随机抽取三个0-9的数字进行乘法运算，结果为下一发子弹的攻击力'
     },
+    [SKILL_TIME_TRAVEL]: {
+      cooldown: 18,
+      name: '时间穿越',
+      description: '召唤随机血量分身，本体血量降至分身值时触发替换'
+    },
     [SKILL_PING_PONG]: {
       cooldown: 8,
       fireCooldown: 1.5,
@@ -138,6 +144,7 @@ module.exports = {
   GAME_STATUS_FINISHED,
 
   SKILL_ALGORITHMIC_DAMAGE,
+  SKILL_TIME_TRAVEL,
   SKILL_PING_PONG,
   SKILL_BOOLEAN_MOTION,
 
