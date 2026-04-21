@@ -58,8 +58,8 @@ function updateBullet(bullet, dt, gameState) {
   ];
 
   for (let point of checkPoints) {
-    const tx = Math.floor(point.x);
-    const ty = Math.floor(point.y);
+    const tx = Math.round(point.x);
+    const ty = Math.round(point.y);
 
     if (map[ty] && map[ty][tx] !== undefined) {
       const tile = map[ty][tx];

@@ -4,154 +4,260 @@ const {
   TILE_COVER,
   TILE_WALL,
   TILE_EMPTY,
-  GRID_SIZE,
 } = require('../constants');
 
 const { processSkillBullet } = require('../skills/skillManager');
 const { handleBounce, reflectAttack } = require('../skills/pingPong');
 const { updateBullet } = require('../skills/booleanMotion');
 
-// ====================== 工具函数 ======================
+const TILE_HALF_SIZE = 0.5;
+const MOVE_STEP = 0.08;
+const COLLISION_EPSILON = 1e-6;
 
-function toPixels(val) {
-  return val * GRID_SIZE;
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
-function isWallOrCover(map, x, y) {
-  const tx = Math.floor(x);
-  const ty = Math.floor(y);
-  if (!map[ty] || map[ty][tx] === undefined) return true;
-  const tile = map[ty][tx];
-  return tile === TILE_WALL || tile === TILE_COVER;
+function normalize(x, y) {
+  const length = Math.sqrt(x * x + y * y) || 1;
+  return { x: x / length, y: y / length };
 }
 
-// 多点采样检测 + 破坏掩体
-function handleBulletWallAndCover(bullet, map) {
-  const samples = 10;
-  const prevX = bullet.x - bullet.vx * 0.025;
-  const prevY = bullet.y - bullet.vy * 0.025;
+function isSolidTile(map, tileX, tileY) {
+  return Boolean(
+    map[tileY]
+      && (map[tileY][tileX] === TILE_WALL || map[tileY][tileX] === TILE_COVER)
+  );
+}
 
-  for (let i = 1; i <= samples; i++) {
+function getTileBounds(tileX, tileY) {
+  return {
+    left: tileX - TILE_HALF_SIZE,
+    right: tileX + TILE_HALF_SIZE,
+    top: tileY - TILE_HALF_SIZE,
+    bottom: tileY + TILE_HALF_SIZE,
+  };
+}
+
+function getNearbyTileRange(map, x, y, radius) {
+  return {
+    minTileX: Math.max(0, Math.floor(x - radius - TILE_HALF_SIZE)),
+    maxTileX: Math.min(map[0].length - 1, Math.ceil(x + radius + TILE_HALF_SIZE)),
+    minTileY: Math.max(0, Math.floor(y - radius - TILE_HALF_SIZE)),
+    maxTileY: Math.min(map.length - 1, Math.ceil(y + radius + TILE_HALF_SIZE)),
+  };
+}
+
+function getSeparationVector(x, y, radius, tileX, tileY) {
+  const bounds = getTileBounds(tileX, tileY);
+  const closestX = clamp(x, bounds.left, bounds.right);
+  const closestY = clamp(y, bounds.top, bounds.bottom);
+  const dx = x - closestX;
+  const dy = y - closestY;
+  const distanceSq = dx * dx + dy * dy;
+
+  if (distanceSq >= radius * radius) {
+    return null;
+  }
+
+  if (distanceSq > COLLISION_EPSILON) {
+    const distance = Math.sqrt(distanceSq);
+    const overlap = radius - distance;
+    return {
+      x: (dx / distance) * overlap,
+      y: (dy / distance) * overlap,
+    };
+  }
+
+  const options = [
+    { x: (bounds.left - radius) - x, y: 0 },
+    { x: (bounds.right + radius) - x, y: 0 },
+    { x: 0, y: (bounds.top - radius) - y },
+    { x: 0, y: (bounds.bottom + radius) - y },
+  ];
+
+  options.sort((a, b) => (Math.abs(a.x) + Math.abs(a.y)) - (Math.abs(b.x) + Math.abs(b.y)));
+  return options[0];
+}
+
+function preferAxis(push, axis) {
+  if (!axis) {
+    return push;
+  }
+
+  if (axis === 'x' && Math.abs(push.x) > COLLISION_EPSILON) {
+    return { x: push.x, y: 0 };
+  }
+
+  if (axis === 'y' && Math.abs(push.y) > COLLISION_EPSILON) {
+    return { x: 0, y: push.y };
+  }
+
+  return push;
+}
+
+function resolveSolidCollisions(entity, map, preferredAxis) {
+  const radius = entity.radius || CONFIG.entityRadius;
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    let resolved = false;
+    const range = getNearbyTileRange(map, entity.x, entity.y, radius);
+
+    for (let tileY = range.minTileY; tileY <= range.maxTileY; tileY += 1) {
+      for (let tileX = range.minTileX; tileX <= range.maxTileX; tileX += 1) {
+        if (!isSolidTile(map, tileX, tileY)) {
+          continue;
+        }
+
+        const push = getSeparationVector(entity.x, entity.y, radius, tileX, tileY);
+        if (!push) {
+          continue;
+        }
+
+        const offset = preferAxis(push, preferredAxis);
+        entity.x += offset.x;
+        entity.y += offset.y;
+        resolved = true;
+      }
+    }
+
+    if (!resolved) {
+      break;
+    }
+  }
+}
+
+function clampEntityPosition(entity, map) {
+  const radius = entity.radius || CONFIG.entityRadius;
+  entity.x = clamp(entity.x, TILE_HALF_SIZE + radius, map[0].length - 1 - TILE_HALF_SIZE - radius);
+  entity.y = clamp(entity.y, TILE_HALF_SIZE + radius, map.length - 1 - TILE_HALF_SIZE - radius);
+}
+
+function moveAlongAxis(entity, map, axis, delta) {
+  if (!delta) {
+    return;
+  }
+
+  entity[axis] += delta;
+  clampEntityPosition(entity, map);
+  resolveSolidCollisions(entity, map, axis);
+  clampEntityPosition(entity, map);
+}
+
+function getTileCollisionAt(map, x, y, radius) {
+  const range = getNearbyTileRange(map, x, y, radius);
+
+  for (let tileY = range.minTileY; tileY <= range.maxTileY; tileY += 1) {
+    for (let tileX = range.minTileX; tileX <= range.maxTileX; tileX += 1) {
+      const tile = map[tileY] && map[tileY][tileX];
+      if (tile !== TILE_WALL && tile !== TILE_COVER) {
+        continue;
+      }
+
+      if (getSeparationVector(x, y, radius, tileX, tileY)) {
+        return { tile, tileX, tileY, hitX: x, hitY: y };
+      }
+    }
+  }
+
+  return null;
+}
+
+function traceTileCollision(map, fromX, fromY, toX, toY, radius) {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  const samples = Math.max(6, Math.ceil(distance / 0.05));
+
+  for (let i = 1; i <= samples; i += 1) {
     const t = i / samples;
-    const checkX = prevX + (bullet.x - prevX) * t;
-    const checkY = prevY + (bullet.y - prevY) * t;
-
-    const tx = Math.floor(checkX);
-    const ty = Math.floor(checkY);
-
-    if (!map[ty] || map[ty][tx] === undefined) continue;
-
-    const tile = map[ty][tx];
-
-    if (tile === TILE_WALL) {
-      if (bullet.skillEffect !== 'ping_pong' && bullet.skillEffect !== 'boolean_motion') {
-        return false;
-      }
-      if (bullet.skillEffect === 'boolean_motion') {
-        return false;
-      }
-    }
-
-    if (tile === TILE_COVER) {
-      map[ty][tx] = TILE_EMPTY;
-
-      if (bullet.skillEffect === 'ping_pong' || bullet.skillEffect === 'boolean_motion') {
-        return false;
-      }
-      return false;
+    const x = fromX + dx * t;
+    const y = fromY + dy * t;
+    const collision = getTileCollisionAt(map, x, y, radius);
+    if (collision) {
+      return collision;
     }
   }
-  return true;
+
+  return null;
 }
 
-// ====================== 实体碰撞 - 修复边缘透明墙问题 ======================
+function handleBulletWallAndCover(bullet, map, prevX, prevY) {
+  const collision = traceTileCollision(
+    map,
+    prevX,
+    prevY,
+    bullet.x,
+    bullet.y,
+    bullet.radius || CONFIG.bulletRadius
+  );
 
-function resolveEntityCollisions(entity, map) {
-  const radius = toPixels(entity.radius || CONFIG.entityRadius);
-  const ex = toPixels(entity.x);
-  const ey = toPixels(entity.y);
-  const mapWidth = map[0].length;
-  const mapHeight = map.length;
-
-  for (let y = 0; y < mapHeight; y++) {
-    for (let x = 0; x < mapWidth; x++) {
-      if (map[y][x] !== TILE_WALL && map[y][x] !== TILE_COVER) continue;
-
-      const rx = x * GRID_SIZE;
-      const ry = y * GRID_SIZE;
-      const rw = GRID_SIZE;
-      const rh = GRID_SIZE;
-
-      const closestX = Math.max(rx, Math.min(ex, rx + rw));
-      const closestY = Math.max(ry, Math.min(ey, ry + rh));
-
-      const dx = ex - closestX;
-      const dy = ey - closestY;
-      const distSq = dx * dx + dy * dy;
-
-      if (distSq < radius * radius && distSq > 0.0001) {
-        const dist = Math.sqrt(distSq) || 0.001;
-
-        // 对地图最边缘的墙，推开力度减弱，避免“透明墙”感觉
-        const isEdgeWall = (x === 0 || x === mapWidth - 1 || y === 0 || y === mapHeight - 1);
-        const pushFactor = isEdgeWall ? 0.6 : 1.0;   // 边缘墙推开力度减小
-
-        entity.x += (dx / dist) * (radius - dist + 2) * pushFactor / GRID_SIZE;
-        entity.y += (dy / dist) * (radius - dist + 2) * pushFactor / GRID_SIZE;
-      }
-    }
+  if (!collision) {
+    return { keep: true, collision: null };
   }
+
+  if (collision.tile === TILE_WALL) {
+    if (bullet.skillEffect === 'ping_pong') {
+      return { keep: true, collision };
+    }
+    return { keep: false, collision };
+  }
+
+  map[collision.tileY][collision.tileX] = TILE_EMPTY;
+  return { keep: false, collision };
 }
 
 function tryMove(entity, map, moveX, moveY, dt) {
-  if (!moveX && !moveY) return;
+  if (!moveX && !moveY) {
+    return;
+  }
 
-  const len = Math.sqrt(moveX * moveX + moveY * moveY) || 1;
-  const vx = moveX / len;
-  const vy = moveY / len;
-
+  const vector = normalize(moveX, moveY);
   const distance = entity.speed * dt;
-  const steps = 8;
-  const step = distance / steps;
+  const totalX = vector.x * distance;
+  const totalY = vector.y * distance;
+  const steps = Math.max(1, Math.ceil(Math.max(Math.abs(totalX), Math.abs(totalY)) / MOVE_STEP));
+  const stepX = totalX / steps;
+  const stepY = totalY / steps;
 
-  for (let i = 0; i < steps; i++) {
-    entity.x += vx * step;
-    entity.y += vy * step;
-
-    // 放宽边界限制，允许更靠近边缘
-    entity.x = Math.max(0.5, Math.min(entity.x, map[0].length - 0.5));
-    entity.y = Math.max(0.5, Math.min(entity.y, map.length - 0.5));
-
-    resolveEntityCollisions(entity, map);
+  for (let i = 0; i < steps; i += 1) {
+    moveAlongAxis(entity, map, 'x', stepX);
+    moveAlongAxis(entity, map, 'y', stepY);
   }
 }
-
-// ====================== 子弹更新 ======================
 
 function updateBullets(state, dt) {
   const survivors = [];
 
-  for (let i = 0; i < state.bullets.length; i++) {
+  for (let i = 0; i < state.bullets.length; i += 1) {
     const bullet = state.bullets[i];
 
     if (bullet.skillEffect !== 'ping_pong') {
       bullet.lifetime = (bullet.lifetime || CONFIG.bulletLifetime) - dt;
-      if (bullet.lifetime <= 0) continue;
+      if (bullet.lifetime <= 0) {
+        continue;
+      }
     }
 
+    const prevX = bullet.x;
+    const prevY = bullet.y;
     bullet.x += bullet.vx * dt;
     bullet.y += bullet.vy * dt;
 
-    if (!handleBulletWallAndCover(bullet, state.map)) {
+    const wallResult = handleBulletWallAndCover(bullet, state.map, prevX, prevY);
+    if (!wallResult.keep) {
       continue;
     }
 
     if (bullet.skillEffect === 'boolean_motion' && typeof updateBullet === 'function') {
       updateBullet(bullet, dt, state);
+      if (bullet.lifetime <= 0) {
+        continue;
+      }
     }
 
     if (bullet.skillEffect === 'ping_pong' && typeof handleBounce === 'function') {
-      if (!handleBounce(bullet, state)) {
+      if (!handleBounce(bullet, state, wallResult.collision)) {
         continue;
       }
     }
@@ -159,12 +265,15 @@ function updateBullets(state, dt) {
     let hit = false;
     const targets = [state.entities.player, state.entities.enemy];
 
-    for (let target of targets) {
-      if (target.id === bullet.ownerId || target.hp <= 0) continue;
+    for (let j = 0; j < targets.length; j += 1) {
+      const target = targets[j];
+      if (target.id === bullet.ownerId || target.hp <= 0) {
+        continue;
+      }
 
       const dx = target.x - bullet.x;
       const dy = target.y - bullet.y;
-      const distSq = dx*dx + dy*dy;
+      const distSq = dx * dx + dy * dy;
       const hitR = (target.radius || CONFIG.entityRadius) + (bullet.radius || CONFIG.bulletRadius);
 
       if (distSq <= hitR * hitR) {
@@ -189,14 +298,13 @@ function updateBullets(state, dt) {
   state.bullets = survivors;
 }
 
-// ====================== 其余函数保持不变 ======================
-
 function updateAmmo(entity, dt) {
   entity.fireCooldown = Math.max(0, entity.fireCooldown - dt);
   if (entity.ammo > 0) {
     entity.reloadTimer = 0;
     return;
   }
+
   entity.reloadTimer += dt;
   if (entity.reloadTimer >= CONFIG.reloadDuration) {
     entity.ammo = CONFIG.maxAmmo;
@@ -205,19 +313,36 @@ function updateAmmo(entity, dt) {
 }
 
 function buildBullet(owner, target, shootDirection) {
-  let vx = 1, vy = 0;
+  let vx = 1;
+  let vy = 0;
+
   if (owner.team === 'player' && shootDirection) {
     switch (shootDirection) {
-      case 'up':    vx=0; vy=-1; break;
-      case 'down':  vx=0; vy=1; break;
-      case 'left':  vx=-1; vy=0; break;
-      case 'right': vx=1; vy=0; break;
+      case 'up':
+        vx = 0;
+        vy = -1;
+        break;
+      case 'down':
+        vx = 0;
+        vy = 1;
+        break;
+      case 'left':
+        vx = -1;
+        vy = 0;
+        break;
+      case 'right':
+        vx = 1;
+        vy = 0;
+        break;
+      default:
+        break;
     }
   } else {
     const dx = target.x - owner.x;
     const dy = target.y - owner.y;
-    const len = Math.sqrt(dx*dx + dy*dy) || 1;
-    vx = dx / len; vy = dy / len;
+    const vector = normalize(dx, dy);
+    vx = vector.x;
+    vy = vector.y;
   }
 
   return {
@@ -235,9 +360,14 @@ function buildBullet(owner, target, shootDirection) {
 }
 
 function tryShoot(entity, command, bullets, fallbackTarget, state) {
-  if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) return;
+  if (!command.shoot || entity.fireCooldown > 0 || entity.ammo <= 0) {
+    return;
+  }
+
   const target = command.target || fallbackTarget;
-  if (!target) return;
+  if (!target) {
+    return;
+  }
 
   const bullet = buildBullet(entity, target, command.shootDirection);
   bullets.push(bullet);

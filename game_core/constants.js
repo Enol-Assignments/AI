@@ -32,34 +32,20 @@ const DIRECTIONS = [
  * @typedef {TileType[][]} MapGrid
  * @typedef {{x: number, y: number}} GridPosition
  */
-
-// ====================== 新增：圆形碰撞支持（最小改动） ======================
-
-/** 
- * 每个格子的像素大小（从 index.js 的 cellSize 计算得出）
- * 在 physics.js 中用于把比例半径转为像素进行碰撞检测
+/**
+ * 世界坐标约定：
+ * - 整数网格点 `(x, y)` 表示格子中心
+ * - 墙体与掩体占据 `[x - 0.5, x + 0.5] × [y - 0.5, y + 0.5]`
+ * - 实体和子弹的 `x / y` 都记录几何中心
  */
-const GRID_SIZE = 30;   // ← 你可以根据实际绘制效果微调（20~40 之间较好）
-
-/** 实体碰撞半径（格子比例） - 用于碰撞检测，不影响绘制大小 */
-const ENTITY_RADIUS_RATIO = 0.35;   // 与你原来 entityRadius 一致
-
-/** 子弹碰撞半径（格子比例） - 用于碰撞检测 */
-const BULLET_RADIUS_RATIO = 0.18;   // 与你原来 bulletRadius 一致
-
-/** 墙壁碰撞厚度（像素） */
-const WALL_THICKNESS = GRID_SIZE;
-
-/** 可破坏掩体碰撞厚度（像素） */
-const COVER_THICKNESS = GRID_SIZE;
 
 /**
  * @typedef {Object} EntityState
  * @property {string} id
  * @property {string} team
- * @property {number} x                    // 中心点坐标（格子比例，0~mapWidth）
+ * @property {number} x                    // 世界坐标中心；整数值对应格子中心
  * @property {number} y
- * @property {number} radius               // 半径（格子比例，例如 0.35）
+ * @property {number} radius               // 半径（单位：格）
  * @property {number} hp
  * @property {number} maxHp
  * @property {number} atk
@@ -92,15 +78,11 @@ const CONFIG = {
   maxAmmo: 6,
   playerSpeed: 4.5,           // 保持你原来的风格
   aiSpeed: 4.2,
-  
-  // 重要：使用比例半径（不改变你当前绘制的大小）
-  entityRadius: ENTITY_RADIUS_RATIO,
-  bulletRadius: BULLET_RADIUS_RATIO,
-  gridSize: GRID_SIZE,        // 新增，供 physics.js 使用
+  entityRadius: 0.35,
+  bulletRadius: 0.18,
 
   coverHp: 2,
 
-  // 技能配置（完全保留你原来的）
   skills: {
     [SKILL_ALGORITHMIC_DAMAGE]: {
       cooldown: 10,
@@ -150,11 +132,4 @@ module.exports = {
 
   CONFIG,
   DIRECTIONS,
-
-  // 新增导出（供 physics.js 使用）
-  GRID_SIZE,
-  ENTITY_RADIUS_RATIO,
-  BULLET_RADIUS_RATIO,
-  WALL_THICKNESS,
-  COVER_THICKNESS,
 };

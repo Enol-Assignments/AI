@@ -1,136 +1,22 @@
-# 0.0.0
+# 开发日志
 
-已经把第一版骨架和主逻辑循环接起来了，现在这个小程序至少不是“空壳子”了，已经有一套能跑的迷宫对战原型。核心常量、数据结构约定和全局配置我放在了 `game_core/constants.js`，方便你们后面协作时统一接口【F:/D:/Enol/Workspace/WeChat/game_core/constants.js†L1-L88】。迷宫生成用了随机 DFS 加破墙与掩体投放【F:/D:/Enol/Workspace/WeChat/game_core/maze/generator.js†L35-L105】；寻路是按文档落的 A*【F:/D:/Enol/Workspace/WeChat/game_core/ai/pathfinding.js†L22-L78】；AI 决策这边先做了一个可扩展的行为树雏形，包含视线检测、低血量撤退和来弹闪避【F:/D:/Enol/Workspace/WeChat/game_core/ai/behaviorTree.js†L24-L150】。物理层已经能处理移动、射击、装弹、子弹命中和掩体破坏【F:/D:/Enol/Workspace/WeChat/game_core/engine/physics.js†L17-L161】；主循环则负责初始化、逐帧推进、狂暴收尾和胜负判定【F:/D:/Enol/Workspace/WeChat/game_core/engine/gameLoop.js†L35-L124】。
+## 当前状态
+- 项目已经具备可玩的迷宫对战原型，主循环、玩家输入、AI 决策、子弹结算和技能系统都在运行。
+- 当前世界坐标统一为“整数点对应格子中心”，墙体与掩体占据完整的 1x1 格范围，实体和子弹都按几何中心记录位置。
+- 这份日志只保留当前有效的实现约定，旧的实验记录和临时建议已经清掉了，方便后面直接合分支。
 
-首页我也改成了一个能直接承接这套逻辑的原型页：`index.js` 里接好了 Canvas 初始化、16ms 定时循环、HUD 更新和触控输入【F:/D:/Enol/Workspace/WeChat/pages/index/index.js†L21-L216】，`index.wxml` 放了画布、状态栏和简易方向键/开火键【F:/D:/Enol/Workspace/WeChat/pages/index/index.wxml†L1-L75】，`index.wxss` 做了基础布局和样式【F:/D:/Enol/Workspace/WeChat/pages/index/index.wxss†L1-L114】。现在你在微信开发者工具里打开，应该就能看到一个“玩家 vs AI”的迷宫对战原型，先把主循环心脏跳起来了。
+## 核心文件分工
+- `game_core/constants.js`：全局常量、技能 ID、实体结构和坐标约定。
+- `game_core/maze/generator.js`：迷宫生成与掩体投放，保证出生点之间不会被堵死。
+- `game_core/ai/pathfinding.js`：A* 寻路。
+- `game_core/ai/behaviorTree.js`：AI 的追击、闪避、开火、拆掩体逻辑。
+- `game_core/engine/gameLoop.js`：对局初始化、逐帧推进、狂暴规则和胜负判定。
+- `game_core/engine/physics.js`：角色移动、圆形碰撞、射击、子弹命中和掩体销毁。
+- `game_core/skills/*.js`：技能效果与特殊子弹行为。
+- `pages/index/index.js`：Canvas 渲染、输入同步和 HUD。
 
-我这边做了静态检查和接口对齐，但当前环境里没有可用的 `node`，也没法直接替你在微信开发者工具里真机跑一遍，所以还没做运行态验证。下一步我建议我们优先补两件事：一是把玩家射击方向从“永远朝敌人”升级成摇杆/触点瞄准，二是把角色技能系统接进 `behaviorTree` 和 `physics`，这样就开始接近你 README 里那版真正的玩法了。
-
-
-剩余：角色相关、物理引擎。
-
-
-
-
-需要修改的核心文件（优先级从高到低）
-以下是必须改动的文件，我会说明每个文件要改什么：
-
-game_core/constants.js （最先修改）
-增加实体和子弹的尺寸定义（强烈建议在这里统一管理）。
-示例新增内容：
-
-
-JavaScript// 在 constants.js 中添加
-const ENTITY_RADIUS = 12;        // 玩家/AI 圆形半径（像素），根据你的格子大小调整
-const BULLET_RADIUS = 4;         // 子弹圆形半径（比原来小一点）
-const GRID_SIZE = 40;            // 假设你的迷宫格子像素大小（很重要！）
-const WALL_THICKNESS = GRID_SIZE; // 墙的实际绘制厚度
-
-// EntityState 结构扩展（推荐）
-/**
- * @typedef {Object} EntityState
- * @property {number} x          // 中心点像素坐标
- * @property {number} y
- * @property {number} radius     // 新增：半径
- * @property {number} hp
- * @property {number} vx         // 可选：当前速度分量
- * @property {number} vy
- * ...
- */
-
-game_core/physics.js （最核心，改动最大）
-这是你物理引擎的主要文件，几乎所有碰撞和移动都要在这里升级。
-需要修改/新增的函数：
-updateEntity(entity, dt) 或 moveEntity(entity, dx, dy)
-→ 改为圆形碰撞移动（推荐使用“连续碰撞检测”或“逐步推进 + 滑墙”技术，避免穿墙）。
-checkCollisionWithWalls(entity)
-→ 从“点是否在墙里”改为“圆是否与任何墙矩形重叠”。
-checkBulletCollision(bullet, entity)
-→ 改为圆 vs 圆碰撞（距离 < r1 + r2）。
-checkBulletWithWall(bullet)
-→ 圆 vs 矩形碰撞（用于反弹磁场等技能）。
-新增辅助函数（推荐）：
-circleRectCollision(circle, rect)：圆与墙矩形碰撞检测 + 碰撞点/法线计算（用于反弹）。
-resolveCollision(entity)：碰撞后位置修正（把圆推出来，不卡在墙里）。
-circleCircleCollision(c1, c2)：简单距离判断。
-
-
-
-game_core/engine/gameLoop.js
-在每帧 update() 中：
-调用修改后的 physics.updateEntity(player) 和 physics.updateEntity(ai)。
-调用修改后的 physics.updateBullets()。
-如果有技能（如反弹），在这里或 physics 中处理子弹与墙的圆形碰撞反射。
-
-
-pages/index/index.js （渲染层）
-修改绘制代码：
-原来可能是 ctx.fillRect 或画点，现在改成 ctx.beginPath(); ctx.arc(entity.x, entity.y, entity.radius, 0, Math.PI*2); ctx.fill();
-子弹同样用 arc() 绘制小圆。
-血条、技能特效等可以基于新半径位置调整。
-
-
-game_core/ai/pathfinding.js （需要适配）
-A* 目前是基于格子中心寻路。
-升级后推荐两种方案：
-方案A（简单）：继续用格子中心寻路，但移动时在 physics.js 中做圆形碰撞修正（AI 可能偶尔卡一下，但可接受）。
-方案B（更好）：在 A* 中把“不可走”的格子范围扩大（考虑实体半径），即把靠近墙的格子也视为障碍。或者实现“膨胀地图”（maze inflation）。
-
-
-可选但强烈建议修改的文件
-game_core/ai/behaviorTree.js：AI 决策时考虑新半径（例如射击时预判圆形命中，而不是点）。
-game_core/maze/generator.js：如果需要，可以在生成地图时预留更多空间给实体半径（避免生成太窄的通道）。
-
-
-实现圆形碰撞检测的关键代码建议
-1. 圆与矩形（墙）碰撞检测 + 解析（physics.js 中）
-JavaScript// 圆与轴对齐矩形碰撞检测 + 返回碰撞深度和方向（用于推开）
-function circleRectCollision(circle, rect) {
-  // rect = {x, y, width, height}  // 墙的左上角和尺寸
-  const closestX = Math.max(rect.x, Math.min(circle.x, rect.x + rect.width));
-  const closestY = Math.max(rect.y, Math.min(circle.y, rect.y + rect.height));
-  
-  const dx = circle.x - closestX;
-  const dy = circle.y - closestY;
-  const distance = Math.sqrt(dx*dx + dy*dy);
-  
-  if (distance < circle.radius) {
-    return {
-      collided: true,
-      depth: circle.radius - distance,
-      normalX: dx / distance || 0,   // 推开方向
-      normalY: dy / distance || 0
-    };
-  }
-  return { collided: false };
-}
-2. 移动时防穿墙（推荐“分步移动”或“滑墙”）
-在 updateEntity 中不要一次性移动大距离，而是：
-JavaScriptfunction moveEntityWithCollision(entity, dx, dy, map) {
-  // 可以分成小步移动（推荐10-20步）
-  const steps = 10;
-  const stepDx = dx / steps;
-  const stepDy = dy / steps;
-  
-  for (let i = 0; i < steps; i++) {
-    entity.x += stepDx;
-    entity.y += stepDy;
-    
-    // 检查并解决与所有墙的碰撞
-    resolveWallCollisions(entity, map);
-  }
-}
-3. 子弹圆 vs 实体圆
-JavaScriptfunction checkBulletHit(bullet, entity) {
-  const dx = bullet.x - entity.x;
-  const dy = bullet.y - entity.y;
-  const distSq = dx*dx + dy*dy;
-  return distSq < (bullet.radius + entity.radius) ** 2;
-}
-下一步行动建议
-请你按照以下顺序操作：
-
-先在 constants.js 中加入 ENTITY_RADIUS 和 BULLET_RADIUS。
-把 physics.js 当前完整代码贴给我（尤其是移动和碰撞相关函数）。
-把 gameLoop.js 中 update 部分的代码也贴一下。
-告诉我你当前格子大小（GRID_SIZE 是多少像素？）和画布分辨率，这样我能给你更精确的数值建议。
+## 2026-04-21 这一轮修复
+- 修正了实体和子弹渲染圆心的半格偏移，避免“视觉上的圆”和“逻辑上的位置”错位。
+- 角色移动不再只看一个取整后的点，而是按半径与整块墙体/掩体做碰撞和位置修正。
+- 子弹与墙体、掩体的检测改成和世界坐标一致的方式，避免只在左边和上边触发阻挡。
+- 乒乓球和布尔运动的特殊子弹也同步了坐标判断，避免技能分支继续沿用旧规则。
