@@ -1,14 +1,40 @@
 <navigation-bar title="Maze Duel" back="{{false}}" color="black" background="#f7f1e6"></navigation-bar>
-<scroll-view class="page" scroll-y="true" style="height: 100vh;">
-  <view class="content">
-    <!-- 技能选择区域 -->
+<view class="page-shell">
+  <view class="top-panel">
+    <view class="top-row">
+      <view class="hud-card">
+        <view class="hud-grid">
+          <view class="hud-item">
+            <text class="hud-label">我方 HP</text>
+            <text class="hud-value">{{hpText}}</text>
+          </view>
+          <view class="hud-item">
+            <text class="hud-label">敌方 HP</text>
+            <text class="hud-value danger">{{enemyHpText}}</text>
+          </view>
+          <view class="hud-item">
+            <text class="hud-label">弹药</text>
+            <text class="hud-value">{{ammoText}}</text>
+          </view>
+          <view class="hud-item">
+            <text class="hud-label">时间</text>
+            <text class="hud-value">{{timeText}}</text>
+          </view>
+        </view>
+        <text class="status-text">{{statusText}}</text>
+      </view>
+      <view class="top-actions">
+        <view class="restart-button" bindtap="resetGame">重开</view>
+        <text class="action-tip">摇杆定朝向，按住开火</text>
+      </view>
+    </view>
+
     <view class="skills-container">
-      <!-- 我方技能栏 -->
       <view class="skills-panel player-skills">
         <view class="skills-title">我方技能</view>
         <view class="skills-grid">
-          <view 
-            wx:for="{{skills}}" 
+          <view
+            wx:for="{{skills}}"
             wx:key="id"
             class="skill-button {{item.available ? (item.selected ? 'selected' : 'available') : 'cooldown'}}"
             data-skill-id="{{item.id}}"
@@ -19,110 +45,51 @@
           </view>
         </view>
       </view>
-      
-      <!-- 敌方技能栏 -->
+
       <view class="skills-panel enemy-skills">
         <view class="skills-title">敌方技能</view>
         <view class="skills-grid">
-          <view 
-            wx:for="{{enemySkills}}" 
+          <view
+            wx:for="{{enemySkills}}"
             wx:key="id"
-            class="skill-button {{item.available ? (item.selected ? 'selected' : 'available') : 'cooldown'}}"
-            data-skill-id="{{item.id}}"
-            data-is-enemy="true"
-            bindtap="handleSkillTap"
+            class="skill-button {{item.selected ? 'selected' : 'available'}} enemy-chip"
           >
             <view class="skill-name">{{item.name}}</view>
-            <view class="skill-cooldown" wx:if="{{!item.available}}">{{item.cooldown.toFixed(1)}}s</view>
           </view>
         </view>
       </view>
     </view>
-
-    <view class="hud-card">
-      <view class="hud-row">
-        <text class="hud-label">我方 HP</text>
-        <text class="hud-value">{{hpText}}</text>
-      </view>
-      <view class="hud-row">
-        <text class="hud-label">敌方 HP</text>
-        <text class="hud-value danger">{{enemyHpText}}</text>
-      </view>
-      <view class="hud-row">
-        <text class="hud-label">弹药</text>
-        <text class="hud-value">{{ammoText}}</text>
-      </view>
-      <view class="hud-row">
-      <text class="hud-label">时间</text>
-      <text class="hud-value">{{timeText}}</text>
-    </view>
-    <text class="status-text">{{statusText}}</text>
-    <view class="start-button-container" wx:if="{{!gameStarted}}">
-      <view class="start-button" bindtap="startGame">开始游戏</view>
-    </view>
-    </view>
-
-    <canvas id="game-canvas" type="2d" class="game-canvas"></canvas>
-
-    <view class="control-panel">
-      <view class="dpad">
-        <view class="dpad-row">
-          <view class="control-spacer"></view>
-          <view
-            class="control-button"
-            data-key="up"
-            bindtouchstart="handleControlStart"
-            bindtouchend="handleControlEnd"
-            bindtouchcancel="handleControlEnd"
-          >↑</view>
-          <view class="control-spacer"></view>
-        </view>
-        <view class="dpad-row">
-          <view
-            class="control-button"
-            data-key="left"
-            bindtouchstart="handleControlStart"
-            bindtouchend="handleControlEnd"
-            bindtouchcancel="handleControlEnd"
-          >←</view>
-          <view
-            class="control-button restart"
-            bindtap="resetGame"
-          >重开</view>
-          <view
-            class="control-button"
-            data-key="right"
-            bindtouchstart="handleControlStart"
-            bindtouchend="handleControlEnd"
-            bindtouchcancel="handleControlEnd"
-          >→</view>
-        </view>
-        <view class="dpad-row">
-          <view class="control-spacer"></view>
-          <view
-            class="control-button"
-            data-key="down"
-            bindtouchstart="handleControlStart"
-            bindtouchend="handleControlEnd"
-            bindtouchcancel="handleControlEnd"
-          >↓</view>
-          <view class="control-spacer"></view>
-        </view>
-      </view>
-
-      <view class="shoot-wrap">
-        <view class="shoot-direction">
-          <view class="direction-button" data-direction="up" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">↑</view>
-          <view class="direction-row">
-            <view class="direction-button" data-direction="left" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">←</view>
-            <view class="direction-button" data-direction="down" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">↓</view>
-            <view class="direction-button" data-direction="right" bindtouchstart="handleShootDirection" bindtouchend="handleShootEnd">→</view>
-          </view>
-        </view>
-      </view>
-    </view>
-    
-    <!-- 底部黑边 -->
-    <view class="bottom-border"></view>
   </view>
-</scroll-view>
+
+  <view class="arena-card">
+    <canvas id="game-canvas" type="2d" class="game-canvas" style="height: {{canvasHeightPx}}px;"></canvas>
+  </view>
+
+  <view class="control-panel">
+    <view class="control-card joystick-card">
+      <text class="control-title">移动</text>
+      <view
+        id="move-pad"
+        class="joystick-pad"
+        bindtouchstart="handleJoystickStart"
+        bindtouchmove="handleJoystickMove"
+        bindtouchend="handleJoystickEnd"
+        bindtouchcancel="handleJoystickEnd"
+      >
+        <view class="joystick-core"></view>
+        <view class="joystick-knob" style="transform: translate({{joystickOffsetX}}px, {{joystickOffsetY}}px);"></view>
+      </view>
+    </view>
+
+    <view class="control-card fire-card">
+      <text class="control-title">射击</text>
+      <view
+        class="fire-button {{shooting ? 'active' : ''}}"
+        bindtouchstart="handleShootStart"
+        bindtouchend="handleShootEnd"
+        bindtouchcancel="handleShootEnd"
+      >开火</view>
+      <text class="fire-tip">子弹固定朝当前前进方向</text>
+    </view>
+  </view>
+</view>

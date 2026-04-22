@@ -13,8 +13,10 @@ const {
 } = require('../constants');
 const { findShortestPath } = require('./pathfinding');
 
-const REPATH_INTERVAL = 0.12;
-const PATH_STEP_EPSILON = 0.2;
+const REPATH_INTERVAL = 0.18;
+const PATH_STEP_EPSILON = 0.28;
+const STUCK_TIME_LIMIT = 0.22;
+const STUCK_MOVE_EPSILON = 0.015;
 
 function distanceSq(a, b) {
   const dx = a.x - b.x;
@@ -90,9 +92,37 @@ function ensureAiMemory(aiState) {
       targetCell: null,
       path: [],
       strafeSign: Math.random() > 0.5 ? 1 : -1,
+      lastX: aiState.x,
+      lastY: aiState.y,
+      stuckTimer: 0,
+      lastMoveX: 0,
+      lastMoveY: 0,
     };
   }
   return aiState.aiMemory;
+}
+
+function updateMobilityMemory(memory, aiState) {
+  const movedX = aiState.x - (memory.lastX ?? aiState.x);
+  const movedY = aiState.y - (memory.lastY ?? aiState.y);
+  const movedDistance = Math.sqrt(movedX * movedX + movedY * movedY);
+  const wantedMove = Math.sqrt((memory.lastMoveX || 0) * (memory.lastMoveX || 0) + (memory.lastMoveY || 0) * (memory.lastMoveY || 0));
+
+  if (wantedMove > 0.2 && movedDistance < STUCK_MOVE_EPSILON) {
+    memory.stuckTimer += CONFIG.tickMs / 1000;
+  } else {
+    memory.stuckTimer = Math.max(0, memory.stuckTimer - CONFIG.tickMs / 1000 * 0.5);
+  }
+
+  memory.lastX = aiState.x;
+  memory.lastY = aiState.y;
+  return memory.stuckTimer >= STUCK_TIME_LIMIT;
+}
+
+function finalizeCommand(memory, command) {
+  memory.lastMoveX = command.moveX || 0;
+  memory.lastMoveY = command.moveY || 0;
+  return command;
 }
 
 function getSkillProfile(aiState) {
@@ -269,6 +299,24 @@ function getFallbackPath(memory, map, aiState, playerState, lowHp) {
   return memory.path && memory.path[0];
 }
 
+function buildPathMoveVector(aiState, nextStep) {
+  const currentCell = toGrid(aiState);
+  const stepDx = nextStep.x - currentCell.x;
+  const stepDy = nextStep.y - currentCell.y;
+  const correctionX = Math.max(-0.45, Math.min(0.45, nextStep.x - aiState.x));
+  const correctionY = Math.max(-0.45, Math.min(0.45, nextStep.y - aiState.y));
+
+  if (stepDx !== 0 && stepDy === 0) {
+    return normalize(stepDx, correctionY * 1.8);
+  }
+
+  if (stepDy !== 0 && stepDx === 0) {
+    return normalize(correctionX * 1.8, stepDy);
+  }
+
+  return normalize(nextStep.x - aiState.x, nextStep.y - aiState.y);
+}
+
 function buildMoveCommand(moveVector, playerState) {
   return {
     type: ACTION_MOVE,
@@ -299,17 +347,27 @@ function buildShootCommand(target, moveX, moveY) {
  */
 function tickBehaviorTree(aiState, playerState, bullets, map) {
   const memory = ensureAiMemory(aiState);
+  const isStuck = updateMobilityMemory(memory, aiState);
   const profile = getSkillProfile(aiState);
+
+  if (isStuck) {
+    memory.repathTimer = 0;
+    memory.path = [];
+    memory.targetCell = null;
+    memory.strafeSign *= -1;
+    memory.stuckTimer = STUCK_TIME_LIMIT * 0.5;
+  }
+
   const threat = predictIncomingBullet(aiState, bullets);
   if (threat) {
     const dodgeVector = chooseDodgeVector(aiState, playerState, threat, map, memory);
-    return {
+    return finalizeCommand(memory, {
       type: ACTION_DODGE,
       moveX: dodgeVector.x,
       moveY: dodgeVector.y,
       shoot: false,
       target: { x: playerState.x, y: playerState.y },
-    };
+    });
   }
 
   const canSeePlayer = hasLineOfSight(map, aiState, playerState);
@@ -321,39 +379,51 @@ function tickBehaviorTree(aiState, playerState, bullets, map) {
 
   if (canSeePlayer && canShoot && distance <= profile.shootRange) {
     const towardPlayer = normalize(playerState.x - aiState.x, playerState.y - aiState.y);
-    let moveX = towardPlayer.x * 0.18;
-    let moveY = towardPlayer.y * 0.18;
+    const orbit = {
+      x: -towardPlayer.y * memory.strafeSign,
+      y: towardPlayer.x * memory.strafeSign,
+    };
+    let moveX;
+    let moveY;
 
-    if (distance < profile.preferredMin) {
-      moveX = -towardPlayer.x * 0.28;
-      moveY = -towardPlayer.y * 0.28;
-    } else if (distance >= profile.preferredMax - 0.8) {
-      moveX = towardPlayer.x * 0.3;
-      moveY = towardPlayer.y * 0.3;
+    if (lowHp && distance < 2.2) {
+      moveX = -towardPlayer.x * 0.24;
+      moveY = -towardPlayer.y * 0.24;
+    } else if (distance > profile.preferredMax) {
+      moveX = towardPlayer.x * 0.42;
+      moveY = towardPlayer.y * 0.42;
+    } else if (distance < 1.45) {
+      moveX = towardPlayer.x * 0.1 + orbit.x * 0.06;
+      moveY = towardPlayer.y * 0.1 + orbit.y * 0.06;
     } else {
-      moveX = -towardPlayer.y * memory.strafeSign * 0.22;
-      moveY = towardPlayer.x * memory.strafeSign * 0.22;
+      moveX = towardPlayer.x * 0.16 + orbit.x * 0.08;
+      moveY = towardPlayer.y * 0.16 + orbit.y * 0.08;
     }
 
-    return buildShootCommand({ x: playerState.x, y: playerState.y }, moveX, moveY);
+    if (isStuck) {
+      moveX = towardPlayer.x * 0.38;
+      moveY = towardPlayer.y * 0.38;
+    }
+
+    return finalizeCommand(memory, buildShootCommand({ x: playerState.x, y: playerState.y }, moveX, moveY));
   }
 
   if (coverTarget && canShoot && distance <= profile.shootRange + 1.5) {
     const towardCover = normalize(coverTarget.x - aiState.x, coverTarget.y - aiState.y);
-    return buildShootCommand(
+    return finalizeCommand(memory, buildShootCommand(
       { x: coverTarget.x, y: coverTarget.y },
       towardCover.x * 0.18,
       towardCover.y * 0.18
-    );
+    ));
   }
 
   let targetCell;
   if (lowHp || (lowAmmo && distance < profile.preferredMax + 1.5)) {
     targetCell = findSafestCell(map, aiState, playerState);
-  } else if (!canSeePlayer) {
+  } else if (!canSeePlayer || isStuck) {
     targetCell = toGrid(playerState);
-  } else if (distance < profile.preferredMin) {
-    targetCell = findSafestCell(map, aiState, playerState);
+  } else if (distance > profile.preferredMax + 0.8) {
+    targetCell = toGrid(playerState);
   } else {
     targetCell = findPressureCell(map, aiState, playerState, profile);
   }
@@ -363,18 +433,18 @@ function tickBehaviorTree(aiState, playerState, bullets, map) {
     nextStep = getFallbackPath(memory, map, aiState, playerState, lowHp);
   }
   if (nextStep) {
-    const moveVector = normalize(nextStep.x - aiState.x, nextStep.y - aiState.y);
-    return buildMoveCommand(moveVector, playerState);
+    const moveVector = buildPathMoveVector(aiState, nextStep);
+    return finalizeCommand(memory, buildMoveCommand(moveVector, playerState));
   }
 
   const fallback = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)];
-  return {
+  return finalizeCommand(memory, {
     type: ACTION_IDLE,
     moveX: fallback.x * 0.15,
     moveY: fallback.y * 0.15,
     shoot: false,
     target: { x: playerState.x, y: playerState.y },
-  };
+  });
 }
 
 module.exports = {

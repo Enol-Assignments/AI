@@ -2,30 +2,56 @@ page {
   background: linear-gradient(180deg, #f9f4eb 0%, #eadfcb 100%);
 }
 
-.page {
-  width: 100%;
-}
-
-.content {
-  padding: 24rpx;
+.page-shell {
+  height: 100vh;
+  padding: 14rpx;
   box-sizing: border-box;
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  overflow: hidden;
 }
 
-.hud-card {
+.top-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.top-row {
+  display: flex;
+  gap: 10rpx;
+  align-items: stretch;
+}
+
+.hud-card,
+.skills-panel,
+.control-card,
+.arena-card {
   background: rgba(255, 250, 242, 0.92);
   border: 2rpx solid rgba(73, 57, 44, 0.12);
   border-radius: 24rpx;
-  padding: 24rpx;
   box-shadow: 0 12rpx 32rpx rgba(73, 57, 44, 0.08);
 }
 
-.hud-row {
+.hud-card {
+  flex: 1;
+  padding: 14rpx 16rpx;
+}
+
+.hud-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 20rpx;
+  row-gap: 10rpx;
+}
+
+.hud-item {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 10rpx;
+  align-items: center;
   color: #4a3b2f;
-  font-size: 28rpx;
+  font-size: 24rpx;
 }
 
 .hud-label {
@@ -42,131 +68,75 @@ page {
 
 .status-text {
   display: block;
-  margin-top: 12rpx;
+  margin-top: 8rpx;
   color: #6a5848;
-  font-size: 26rpx;
+  font-size: 21rpx;
+  line-height: 1.28;
 }
 
-.game-canvas {
-  width: 100%;
-  height: 760rpx;
-  margin-top: 24rpx;
-  border-radius: 28rpx;
-  overflow: hidden;
-  background: #f4efe5;
-  box-shadow: 0 16rpx 36rpx rgba(58, 49, 40, 0.12);
-}
-
-.control-panel {
-  margin-top: 28rpx;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20rpx;
-}
-
-.dpad {
-  flex: 1;
-}
-
-.dpad-row {
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
-  margin-bottom: 18rpx;
-}
-
-.control-button,
-.shoot-button {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  width: 120rpx;
-  height: 120rpx;
-  border-radius: 28rpx;
-  background: #fff8ee;
-  color: #47372c;
-  font-size: 38rpx;
-  font-weight: 700;
-  box-shadow: 0 10rpx 22rpx rgba(73, 57, 44, 0.12);
-}
-
-.restart {
-  width: 140rpx;
-  font-size: 30rpx;
-  background: #ffd9a0;
-}
-
-.shoot-wrap {
-  width: 220rpx;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.shoot-button {
-  width: 180rpx;
-  height: 180rpx;
-  border-radius: 90rpx;
-  background: #ef7f5a;
-  color: #fff8f2;
-}
-
-/* 射击方向按钮样式 */
-.shoot-direction {
+.top-actions {
+  width: 168rpx;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  gap: 8rpx;
+}
+
+.restart-button {
+  display: flex;
   align-items: center;
-  gap: 8rpx;
-}
-
-.direction-row {
-  display: flex;
-  gap: 8rpx;
-}
-
-.direction-button {
-  width: 60rpx;
-  height: 60rpx;
-  border-radius: 12rpx;
-  background: #ef7f5a;
-  color: #fff8f2;
-  font-size: 24rpx;
-  font-weight: 700;
-  display: flex;
   justify-content: center;
-  align-items: center;
-  box-shadow: 0 6rpx 12rpx rgba(239, 127, 90, 0.3);
-  transition: all 0.2s ease;
+  min-height: 78rpx;
+  padding: 0 16rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(135deg, #ffd28f 0%, #f0a952 100%);
+  color: #5a3816;
+  font-size: 26rpx;
+  font-weight: 700;
+  box-shadow: 0 10rpx 22rpx rgba(173, 107, 30, 0.22);
 }
 
-.direction-button:active {
-  transform: scale(0.92);
-  box-shadow: 0 3rpx 6rpx rgba(239, 127, 90, 0.4);
+.action-tip {
+  color: #7b6757;
+  font-size: 18rpx;
+  line-height: 1.35;
+  padding: 0 4rpx;
 }
 
-.control-spacer {
-  width: 120rpx;
-  height: 120rpx;
-}
-
-/* 技能容器样式 */
 .skills-container {
-  margin-top: 16rpx;
   display: flex;
-  flex-direction: row;
-  gap: 12rpx;
-  align-items: center;
+  gap: 8rpx;
 }
 
-/* 技能面板样式 */
 .skills-panel {
   flex: 1;
-  background: rgba(255, 250, 242, 0.92);
-  border: 2rpx solid rgba(73, 57, 44, 0.12);
-  border-radius: 12rpx;
   padding: 8rpx;
-  box-shadow: 0 4rpx 12rpx rgba(73, 57, 44, 0.08);
+}
+
+.skills-title {
+  font-size: 18rpx;
+  font-weight: 700;
+  color: #4a3b2f;
+  margin-bottom: 6rpx;
+  text-align: center;
+}
+
+.skills-grid {
+  display: flex;
+  gap: 4rpx;
+}
+
+.skill-button {
+  position: relative;
+  flex: 1;
+  min-height: 52rpx;
+  padding: 6rpx 3rpx;
+  border-radius: 12rpx;
+  box-shadow: 0 2rpx 6rpx rgba(73, 57, 44, 0.08);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 
 .player-skills {
@@ -177,90 +147,31 @@ page {
   border-left: 4rpx solid #f25f5c;
 }
 
-.skills-title {
-  font-size: 20rpx;
-  font-weight: 700;
-  color: #4a3b2f;
-  margin-bottom: 8rpx;
-  text-align: center;
-}
-
-.skills-grid {
-  display: flex;
-  flex-direction: row;
-  gap: 6rpx;
-  justify-content: space-around;
-}
-
-.skill-button {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 8rpx 4rpx;
-  border-radius: 8rpx;
-  box-shadow: 0 2rpx 4rpx rgba(73, 57, 44, 0.08);
-  transition: all 0.2s ease;
-  min-height: 60rpx;
-  flex: 1;
-}
-
 .skill-button.available {
   background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%);
   border: 2rpx solid #c3e6cb;
-  cursor: pointer;
-}
-
-.skill-button.available:active {
-  transform: scale(0.96);
-  box-shadow: 0 4rpx 8rpx rgba(73, 57, 44, 0.12);
 }
 
 .skill-button.selected {
   background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
   border: 3rpx solid #2196f3;
-  box-shadow: 0 0 16rpx rgba(33, 150, 243, 0.6);
-  transform: scale(1.05);
-  transition: all 0.3s ease;
+  box-shadow: 0 0 16rpx rgba(33, 150, 243, 0.45);
 }
 
-.skill-button.selected:active {
-  transform: scale(1);
+.enemy-chip.selected {
+  background: linear-gradient(135deg, #ffe3de 0%, #ffc5bc 100%);
+  border: 2rpx solid #ef8b7c;
+  box-shadow: none;
 }
 
 .skill-button.cooldown {
   background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
   border: 2rpx solid #f1b0b7;
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-/* 开始按钮样式 */
-.start-button-container {
-  margin-top: 20rpx;
-  display: flex;
-  justify-content: center;
-}
-
-.start-button {
-  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-  color: white;
-  font-size: 32rpx;
-  font-weight: 700;
-  padding: 16rpx 48rpx;
-  border-radius: 24rpx;
-  box-shadow: 0 8rpx 16rpx rgba(76, 175, 80, 0.3);
-  transition: all 0.3s ease;
-}
-
-.start-button:active {
-  transform: scale(0.96);
-  box-shadow: 0 4rpx 8rpx rgba(76, 175, 80, 0.4);
+  opacity: 0.72;
 }
 
 .skill-name {
-  font-size: 16rpx;
+  font-size: 14rpx;
   font-weight: 600;
   color: #4a3b2f;
   text-align: center;
@@ -269,23 +180,138 @@ page {
 
 .skill-cooldown {
   position: absolute;
-  bottom: 2rpx;
-  right: 2rpx;
+  right: 4rpx;
+  bottom: 4rpx;
   font-size: 12rpx;
   font-weight: 700;
   color: #c44f4f;
-  background: rgba(255, 255, 255, 0.8);
-  padding: 1rpx 4rpx;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0 4rpx;
   border-radius: 6rpx;
-  min-width: 30rpx;
-  text-align: center;
 }
 
-/* 底部黑边 */
-.bottom-border {
-  margin-top: 40rpx;
-  height: 40rpx;
-  background: linear-gradient(90deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 50%, rgba(0,0,0,0.3) 100%);
-  border-radius: 20rpx;
-  margin-bottom: 24rpx;
+.arena-card {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8rpx;
+  overflow: hidden;
+}
+
+.game-canvas {
+  width: 100%;
+  border-radius: 28rpx;
+  overflow: hidden;
+  background: #f4efe5;
+}
+
+.control-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.control-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 14rpx;
+  min-height: 196rpx;
+}
+
+.control-title {
+  color: #5e4c3e;
+  font-size: 20rpx;
+  font-weight: 700;
+  margin-bottom: 10rpx;
+}
+
+.joystick-pad {
+  position: relative;
+  width: 168rpx;
+  height: 168rpx;
+  border-radius: 84rpx;
+  background:
+    radial-gradient(circle at center, rgba(255,255,255,0.75) 0 28%, transparent 29% 100%),
+    linear-gradient(180deg, rgba(105, 83, 65, 0.08) 0%, rgba(105, 83, 65, 0.16) 100%);
+  border: 4rpx solid rgba(87, 69, 55, 0.14);
+  box-shadow: inset 0 8rpx 18rpx rgba(91, 74, 58, 0.08);
+}
+
+.joystick-pad::before,
+.joystick-pad::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(87, 69, 55, 0.08);
+  transform: translate(-50%, -50%);
+}
+
+.joystick-pad::before {
+  width: 8rpx;
+  height: 112rpx;
+}
+
+.joystick-pad::after {
+  width: 112rpx;
+  height: 8rpx;
+}
+
+.joystick-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34rpx;
+  height: 34rpx;
+  margin-left: -17rpx;
+  margin-top: -17rpx;
+  border-radius: 50%;
+  background: rgba(91, 74, 58, 0.18);
+}
+
+.joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 74rpx;
+  height: 74rpx;
+  margin-left: -37rpx;
+  margin-top: -37rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #fffaf2 0%, #e7d8c5 100%);
+  box-shadow: 0 12rpx 22rpx rgba(73, 57, 44, 0.22);
+}
+
+.fire-card {
+  gap: 12rpx;
+}
+
+.fire-button {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 156rpx;
+  height: 156rpx;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff996d 0%, #e95b4c 100%);
+  color: #fff8f2;
+  font-size: 34rpx;
+  font-weight: 700;
+  box-shadow: 0 16rpx 30rpx rgba(220, 101, 73, 0.3);
+}
+
+.fire-button.active {
+  transform: scale(0.96);
+  box-shadow: 0 10rpx 18rpx rgba(220, 101, 73, 0.4);
+}
+
+.fire-tip {
+  color: #7b6757;
+  font-size: 18rpx;
+  line-height: 1.3;
+  text-align: center;
 }

@@ -31,6 +31,8 @@ function createEntity(id, team, x, y, color, overrides) {
     radius: CONFIG.entityRadius,
     action: ACTION_IDLE,
     color,
+    facingX: team === TEAM_ENEMY ? -1 : 1,
+    facingY: 0,
     activeSkill: null,
     skillCooldown: 0,
     skillData: {},
@@ -64,14 +66,17 @@ function createGameState() {
 }
 
 function getPlayerCommand(input, enemy) {
-  const moveX = (input.right ? 1 : 0) - (input.left ? 1 : 0);
-  const moveY = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  const moveX = input.moveX || 0;
+  const moveY = input.moveY || 0;
   return {
     type: moveX || moveY ? ACTION_MOVE : ACTION_IDLE,
     moveX,
     moveY,
     shoot: Boolean(input.shoot),
-    shootDirection: input.shootDirection || 'right',
+    shootVector: {
+      x: input.facingX || 1,
+      y: input.facingY || 0,
+    },
     target: { x: enemy.x, y: enemy.y },
   };
 }

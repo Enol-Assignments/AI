@@ -23,6 +23,33 @@ function normalize(x, y) {
   return { x: x / length, y: y / length };
 }
 
+function updateFacing(entity, command) {
+  if (!command) {
+    return;
+  }
+
+  const moveMagnitude = Math.sqrt((command.moveX || 0) * (command.moveX || 0) + (command.moveY || 0) * (command.moveY || 0));
+  if (moveMagnitude > 0.08) {
+    const vector = normalize(command.moveX, command.moveY);
+    entity.facingX = vector.x;
+    entity.facingY = vector.y;
+    return;
+  }
+
+  if (command.shootVector) {
+    const vector = normalize(command.shootVector.x, command.shootVector.y);
+    entity.facingX = vector.x;
+    entity.facingY = vector.y;
+    return;
+  }
+
+  if (command.target) {
+    const vector = normalize(command.target.x - entity.x, command.target.y - entity.y);
+    entity.facingX = vector.x;
+    entity.facingY = vector.y;
+  }
+}
+
 function isSolidTile(map, tileX, tileY) {
   return Boolean(
     map[tileY]
@@ -312,37 +339,23 @@ function updateAmmo(entity, dt) {
   }
 }
 
-function buildBullet(owner, target, shootDirection) {
-  let vx = 1;
-  let vy = 0;
+function buildBullet(owner, command, fallbackTarget) {
+  let vx = owner.facingX || 1;
+  let vy = owner.facingY || 0;
 
-  if (owner.team === 'player' && shootDirection) {
-    switch (shootDirection) {
-      case 'up':
-        vx = 0;
-        vy = -1;
-        break;
-      case 'down':
-        vx = 0;
-        vy = 1;
-        break;
-      case 'left':
-        vx = -1;
-        vy = 0;
-        break;
-      case 'right':
-        vx = 1;
-        vy = 0;
-        break;
-      default:
-        break;
-    }
-  } else {
-    const dx = target.x - owner.x;
-    const dy = target.y - owner.y;
-    const vector = normalize(dx, dy);
+  if (command.shootVector) {
+    const vector = normalize(command.shootVector.x, command.shootVector.y);
     vx = vector.x;
     vy = vector.y;
+  } else {
+    const target = command.target || fallbackTarget;
+    if (target) {
+      const dx = target.x - owner.x;
+      const dy = target.y - owner.y;
+      const vector = normalize(dx, dy);
+      vx = vector.x;
+      vy = vector.y;
+    }
   }
 
   return {
@@ -364,12 +377,11 @@ function tryShoot(entity, command, bullets, fallbackTarget, state) {
     return;
   }
 
-  const target = command.target || fallbackTarget;
-  if (!target) {
+  if (!command.shootVector && !command.target && !fallbackTarget) {
     return;
   }
 
-  const bullet = buildBullet(entity, target, command.shootDirection);
+  const bullet = buildBullet(entity, command, fallbackTarget);
   bullets.push(bullet);
   processSkillBullet(entity, bullet, state);
 
@@ -390,6 +402,8 @@ function updateWorld(state, commands, dt) {
 
   player.action = playerCommand.type;
   enemy.action = enemyCommand.type;
+  updateFacing(player, playerCommand);
+  updateFacing(enemy, enemyCommand);
 
   tryMove(player, state.map, playerCommand.moveX, playerCommand.moveY, dt);
   tryMove(enemy, state.map, enemyCommand.moveX, enemyCommand.moveY, dt);
