@@ -12,15 +12,43 @@ const { createGameState, stepGame } = require('../../game_core/engine/gameLoop')
 const { activateSkill } = require('../../game_core/skills/skillManager');
 
 const TICK_MS = CONFIG.tickMs;
+const JOYSTICK_DEAD_ZONE = 0.14;
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalize(x, y) {
+  const length = Math.sqrt(x * x + y * y) || 1;
+  return { x: x / length, y: y / length };
+}
+
+function getPrimaryTouch(event, identifier) {
+  const touches = event.touches && event.touches.length ? event.touches : event.changedTouches;
+  if (!touches || !touches.length) {
+    return null;
+  }
+
+  if (identifier === undefined || identifier === null) {
+    return touches[0];
+  }
+
+  for (let i = 0; i < touches.length; i += 1) {
+    if (touches[i].identifier === identifier) {
+      return touches[i];
+    }
+  }
+
+  return null;
+}
 
 function createInputState() {
   return {
-    up: false,
-    down: false,
-    left: false,
-    right: false,
+    moveX: 0,
+    moveY: 0,
     shoot: false,
-    shootDirection: 'right',
+    facingX: 1,
+    facingY: 0,
   };
 }
 
@@ -42,7 +70,10 @@ Page({
     statusText: '准备就绪',
     timeText: '0.0s',
     gameStarted: false,
-    currentDirection: 'right',
+    shooting: false,
+    joystickOffsetX: 0,
+    joystickOffsetY: 0,
+    canvasHeightPx: 320,
     skills: [
       { id: SKILL_ALGORITHMIC_DAMAGE, name: '算法伤害', cooldown: 0, available: true, selected: false },
       { id: SKILL_PING_PONG, name: '乒乓球手', cooldown: 0, available: true, selected: false },
@@ -60,6 +91,9 @@ Page({
     this.gameState = createGameState();
     this.lastTimestamp = Date.now();
     this.hudCounter = 0;
+    this.joystickTouchId = null;
+    this.shootTouchId = null;
+    this.joystickRect = null;
     this.setupCanvas();
   },
 
@@ -86,7 +120,23 @@ Page({
 
       this.canvas = canvas;
       this.ctx = ctx;
+      this.updateLayoutMetrics();
       this.startNewGame();
+      this.cacheControlRects();
+    });
+  },
+
+  updateLayoutMetrics() {
+    const windowInfo = wx.getWindowInfo();
+    const horizontalPadding = 18 * 2 / 2;
+    const topBudget = 220;
+    const controlBudget = 190;
+    const reservedHeight = topBudget + controlBudget;
+    const maxCanvasByWidth = Math.max(240, windowInfo.windowWidth - horizontalPadding);
+    const maxCanvasByHeight = Math.max(220, windowInfo.windowHeight - reservedHeight);
+    const canvasHeightPx = Math.floor(Math.min(maxCanvasByWidth, maxCanvasByHeight, windowInfo.windowHeight * 0.42));
+    this.setData({
+      canvasHeightPx: Math.max(220, canvasHeightPx),
     });
   },
 
@@ -96,9 +146,13 @@ Page({
     this.gameState = createGameState();
     this.lastTimestamp = Date.now();
     this.hudCounter = 0;
+    this.joystickTouchId = null;
+    this.shootTouchId = null;
 
     const player = this.gameState.entities.player;
     const enemy = this.gameState.entities.enemy;
+    enemy.facingX = normalize(player.x - enemy.x, player.y - enemy.y).x;
+    enemy.facingY = normalize(player.x - enemy.x, player.y - enemy.y).y;
     const selectedPlayerSkills = this.data.skills.filter((skill) => skill.selected);
     selectedPlayerSkills.forEach((skill) => {
       activateSkill(player, skill.id, this.gameState, enemy);
@@ -118,7 +172,9 @@ Page({
     this.setData({
       gameStarted: true,
       enemySkills,
-      currentDirection: this.inputState.shootDirection,
+      shooting: false,
+      joystickOffsetX: 0,
+      joystickOffsetY: 0,
       statusText: selectedPlayerSkills.length > 0
         ? `开局技能：${selectedPlayerSkills.map((skill) => skill.name).join('、')}`
         : '开局无主动技能，先走位开打',
@@ -127,6 +183,7 @@ Page({
     this.updateHud();
     this.render();
     this.timer = setInterval(() => this.runFrame(), TICK_MS);
+    wx.nextTick(() => this.cacheControlRects());
   },
 
   resetGame() {
@@ -232,16 +289,51 @@ Page({
 
   drawEntity(entity, offsetX, offsetY, cellSize) {
     const ctx = this.ctx;
+    const centerX = offsetX + (entity.x + 0.5) * cellSize;
+    const centerY = offsetY + (entity.y + 0.5) * cellSize;
     ctx.fillStyle = entity.color;
     ctx.beginPath();
     ctx.arc(
-      offsetX + (entity.x + 0.5) * cellSize,
-      offsetY + (entity.y + 0.5) * cellSize,
+      centerX,
+      centerY,
       entity.radius * cellSize,
       0,
       Math.PI * 2
     );
     ctx.fill();
+    this.drawFacingArrow(entity, centerX, centerY, cellSize);
+  },
+
+  drawFacingArrow(entity, centerX, centerY, cellSize) {
+    const ctx = this.ctx;
+    const vector = normalize(entity.facingX || 1, entity.facingY || 0);
+    const shaftLength = Math.max(10, entity.radius * cellSize * 1.45);
+    const arrowSize = Math.max(5, entity.radius * cellSize * 0.45);
+    const startX = centerX + vector.x * entity.radius * cellSize * 0.2;
+    const startY = centerY + vector.y * entity.radius * cellSize * 0.2;
+    const endX = centerX + vector.x * shaftLength;
+    const endY = centerY + vector.y * shaftLength;
+    const leftX = endX - vector.x * arrowSize - vector.y * arrowSize * 0.75;
+    const leftY = endY - vector.y * arrowSize + vector.x * arrowSize * 0.75;
+    const rightX = endX - vector.x * arrowSize + vector.y * arrowSize * 0.75;
+    const rightY = endY - vector.y * arrowSize - vector.x * arrowSize * 0.75;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.96)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+    ctx.lineWidth = Math.max(2, cellSize * 0.08);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(leftX, leftY);
+    ctx.lineTo(rightX, rightY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   },
 
   drawBullet(bullet, offsetX, offsetY, cellSize, ctx) {
@@ -295,40 +387,107 @@ Page({
     });
   },
 
-  handleControlStart(event) {
-    const { key } = event.currentTarget.dataset;
-    if (!key) {
-      return;
-    }
-    this.inputState[key] = true;
+  cacheControlRects() {
+    const query = wx.createSelectorQuery().in(this);
+    query.select('#move-pad').boundingClientRect();
+    query.exec((res) => {
+      this.joystickRect = res && res[0] ? res[0] : null;
+    });
   },
 
-  handleControlEnd(event) {
-    const { key } = event.currentTarget.dataset;
-    if (!key) {
+  updateJoystickFromTouch(touch) {
+    if (!touch || !this.joystickRect) {
       return;
     }
-    this.inputState[key] = false;
+
+    const centerX = this.joystickRect.left + this.joystickRect.width / 2;
+    const centerY = this.joystickRect.top + this.joystickRect.height / 2;
+    const maxRadius = Math.max(20, this.joystickRect.width * 0.5 - 26);
+    let dx = touch.clientX - centerX;
+    let dy = touch.clientY - centerY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance > maxRadius) {
+      dx = dx / distance * maxRadius;
+      dy = dy / distance * maxRadius;
+    }
+
+    const normalizedX = dx / maxRadius;
+    const normalizedY = dy / maxRadius;
+    const magnitude = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+
+    if (magnitude < JOYSTICK_DEAD_ZONE) {
+      this.inputState.moveX = 0;
+      this.inputState.moveY = 0;
+    } else {
+      this.inputState.moveX = clamp(normalizedX, -1, 1);
+      this.inputState.moveY = clamp(normalizedY, -1, 1);
+      const facing = normalize(this.inputState.moveX, this.inputState.moveY);
+      this.inputState.facingX = facing.x;
+      this.inputState.facingY = facing.y;
+    }
+
+    this.setData({
+      joystickOffsetX: Math.round(dx),
+      joystickOffsetY: Math.round(dy),
+    });
   },
 
-  handleShootDirection(event) {
-    const { direction } = event.currentTarget.dataset;
-    if (!direction) {
+  resetJoystick() {
+    this.inputState.moveX = 0;
+    this.inputState.moveY = 0;
+    this.joystickTouchId = null;
+    this.setData({
+      joystickOffsetX: 0,
+      joystickOffsetY: 0,
+    });
+  },
+
+  handleJoystickStart(event) {
+    if (!this.joystickRect) {
+      this.cacheControlRects();
+    }
+    const touch = getPrimaryTouch(event);
+    if (!touch) {
       return;
     }
-    this.inputState.shootDirection = direction;
+    this.joystickTouchId = touch.identifier;
+    this.updateJoystickFromTouch(touch);
+  },
+
+  handleJoystickMove(event) {
+    if (this.joystickTouchId === null || this.joystickTouchId === undefined) {
+      return;
+    }
+    const touch = getPrimaryTouch(event, this.joystickTouchId);
+    if (!touch) {
+      return;
+    }
+    this.updateJoystickFromTouch(touch);
+  },
+
+  handleJoystickEnd(event) {
+    if (this.joystickTouchId === null || this.joystickTouchId === undefined) {
+      return;
+    }
+    const touch = getPrimaryTouch(event, this.joystickTouchId);
+    if (touch || (event.changedTouches || []).some((item) => item.identifier === this.joystickTouchId)) {
+      this.resetJoystick();
+    }
+  },
+
+  handleShootStart(event) {
+    const touch = getPrimaryTouch(event);
+    if (touch) {
+      this.shootTouchId = touch.identifier;
+    }
     this.inputState.shoot = true;
-    this.setData({ currentDirection: direction });
+    this.setData({ shooting: true });
   },
 
   handleShootEnd() {
+    this.shootTouchId = null;
     this.inputState.shoot = false;
-  },
-
-  handleShootTap() {
-    this.inputState.shoot = true;
-    setTimeout(() => {
-      this.inputState.shoot = false;
-    }, 100);
+    this.setData({ shooting: false });
   },
 });
