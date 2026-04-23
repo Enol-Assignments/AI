@@ -64,8 +64,8 @@ function pickRandomSkills(allSkillIds, count) {
 
 Page({
   data: {
-    hpText: '1000 / 1000',
-    enemyHpText: '1000 / 1000',
+    hpText: '300 / 300',
+    enemyHpText: '300 / 300',
     ammoText: `${CONFIG.maxAmmo} / ${CONFIG.maxAmmo}`,
     statusText: '准备就绪',
     timeText: '0.0s',
